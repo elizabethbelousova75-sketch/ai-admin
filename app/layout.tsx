@@ -12,6 +12,7 @@ const links = [
   { href: '/posts', label: 'Посты', icon: '📝' },
   { href: '/domains', label: 'Домены', icon: '🔗' },
   { href: '/integrations', label: 'Интеграции', icon: '🔌' },
+  { href: '/checker', label: 'Проверка сайтов', icon: '🔍' },
   { href: '/settings', label: 'Настройки', icon: '⚙️' },
 ]
 
