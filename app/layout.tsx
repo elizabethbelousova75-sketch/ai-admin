@@ -2,6 +2,7 @@
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { useEffect, useState } from 'react'
 import './globals.css'
 
 const links = [
@@ -14,6 +15,63 @@ const links = [
   { href: '/settings', label: 'Настройки', icon: '⚙️' },
 ]
 
+function AuthGuard({ children }: { children: React.ReactNode }) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const supabase = createClient()
+  const [loading, setLoading] = useState(true)
+  const [user, setUser] = useState<any>(null)
+
+  useEffect(() => {
+    const checkUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      setUser(user)
+      setLoading(false)
+
+      if (!user && pathname !== '/login') {
+        router.replace('/login')
+      }
+      if (user && pathname === '/login') {
+        router.replace('/dashboard')
+      }
+    }
+
+    checkUser()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session?.user && pathname !== '/login') {
+        router.replace('/login')
+      }
+    })
+
+    return () => subscription.unsubscribe()
+  }, [pathname])
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f172a' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '40px', marginBottom: '16px' }}>⏳</div>
+          <p style={{ color: '#64748b' }}>Загрузка...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!user && pathname !== '/login') {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f172a' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '40px', marginBottom: '16px' }}>🔐</div>
+          <p style={{ color: '#64748b' }}>Перенаправление...</p>
+        </div>
+      </div>
+    )
+  }
+
+  return <>{children}</>
+}
+
 function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
@@ -21,8 +79,7 @@ function Sidebar() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
-    router.push('/login')
-    router.refresh()
+    router.replace('/login')
   }
 
   if (pathname === '/login') return null
@@ -45,12 +102,8 @@ function Sidebar() {
         })}
       </nav>
 
-      {/* Кнопка выхода */}
       <div style={{ padding: '16px' }}>
-        <button
-          onClick={handleLogout}
-          style={{ width: '100%', padding: '10px', background: '#450a0a', border: '1px solid #7f1d1d', borderRadius: '8px', color: '#fca5a5', cursor: 'pointer', fontSize: '14px', fontWeight: '600' }}
-        >
+        <button onClick={handleLogout} style={{ width: '100%', padding: '10px', background: '#450a0a', border: '1px solid #7f1d1d', borderRadius: '8px', color: '#fca5a5', cursor: 'pointer', fontSize: '14px', fontWeight: '600' }}>
           🚪 Выйти
         </button>
       </div>
@@ -59,17 +112,27 @@ function Sidebar() {
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="ru">
+      <body style={{ margin: 0, background: '#0f172a', color: '#e2e8f0', fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif' }}>
+        <AuthGuard>
+          <LayoutContent>{children}</LayoutContent>
+        </AuthGuard>
+      </body>
+    </html>
+  )
+}
+
+function LayoutContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const isLogin = pathname === '/login'
 
   return (
-    <html lang="ru">
-      <body style={{ margin: 0, background: '#0f172a', color: '#e2e8f0', fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif' }}>
-        {!isLogin && <Sidebar />}
-        <div style={{ marginLeft: isLogin ? '0' : '260px', minHeight: '100vh', padding: isLogin ? '0' : '28px' }}>
-          {children}
-        </div>
-      </body>
-    </html>
+    <>
+      {!isLogin && <Sidebar />}
+      <div style={{ marginLeft: isLogin ? '0' : '260px', minHeight: '100vh', padding: isLogin ? '0' : '28px' }}>
+        {children}
+      </div>
+    </>
   )
 }
