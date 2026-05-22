@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
@@ -734,8 +734,8 @@ export default function SitesPage() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
         <div>
-          <h1 style={{ fontSize: '28px', fontWeight: 'bold', color: '#0f172a' }}>🌐 Сайты</h1>
-          <p style={{ color: '#64748b', marginTop: '4px' }}>Создавайте и управляйте сайтами</p>
+          <h1 style={{ fontSize: '28px', fontWeight: 'bold', color: '#f1f5f9' }}>🌐 Сайты</h1>
+          <p style={{ color: '#94a3b8', marginTop: '4px' }}>Создавайте и управляйте сайтами</p>
         </div>
         <button onClick={() => setShowNewSite(true)} style={btnStyle()}>+ Создать сайт</button>
       </div>
@@ -743,17 +743,17 @@ export default function SitesPage() {
       {sites.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '80px 20px' }}>
           <div style={{ fontSize: '64px', marginBottom: '16px' }}>🌐</div>
-          <h3 style={{ fontSize: '20px', color: '#64748b', marginBottom: '8px' }}>Нет сайтов</h3>
+          <h3 style={{ fontSize: '20px', color: '#94a3b8', marginBottom: '8px' }}>Нет сайтов</h3>
           <p style={{ color: '#64748b', marginBottom: '24px' }}>Создайте первый сайт чтобы начать</p>
           <button onClick={() => setShowNewSite(true)} style={btnStyle()}>+ Создать сайт</button>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: '20px' }}>
           {sites.map(s => (
-            <div key={s.id} style={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '20px' }}>
+            <div key={s.id} style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '20px' }}>
               <div onClick={() => { setActiveSite(s); setView('pages') }} style={{ height: '130px', background: 'linear-gradient(135deg,#1e3a8a,#3b82f6)', borderRadius: '8px', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '36px', cursor: 'pointer' }}>🌐</div>
-              <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#0f172a', marginBottom: '4px' }}>{s.name}</h3>
-              <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '10px' }}>{s.description || 'Без описания'}</p>
+              <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#f1f5f9', marginBottom: '4px' }}>{s.name}</h3>
+              <p style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '10px' }}>{s.description || 'Без описания'}</p>
               <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '20px', background: s.status === 'published' ? '#064e3b' : '#0f172a', color: s.status === 'published' ? '#34d399' : '#94a3b8', border: '1px solid #e2e8f0' }}>{s.status === 'published' ? '● Опубликован' : '○ Черновик'}</span>
                 <span style={{ fontSize: '11px', color: '#475569' }}>{s.pages?.length || 0} стр.</span>
