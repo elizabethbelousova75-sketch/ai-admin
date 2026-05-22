@@ -1,6 +1,7 @@
 'use client'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { createClient } from '@/lib/supabase/client'
 import './globals.css'
 
 const links = [
@@ -10,16 +11,29 @@ const links = [
   { href: '/posts', label: 'Посты', icon: '📝' },
   { href: '/domains', label: 'Домены', icon: '🔗' },
   { href: '/integrations', label: 'Интеграции', icon: '🔌' },
+  { href: '/settings', label: 'Настройки', icon: '⚙️' },
 ]
 
 function Sidebar() {
   const pathname = usePathname()
+  const router = useRouter()
+  const supabase = createClient()
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.push('/login')
+    router.refresh()
+  }
+
+  if (pathname === '/login') return null
+
   return (
-    <div style={{ width: '260px', minHeight: '100vh', background: 'linear-gradient(180deg, #1e293b 0%, #0f172a 100%)', borderRight: '1px solid #334155', position: 'fixed', top: 0, left: 0, bottom: 0, zIndex: 10 }}>
+    <div style={{ width: '260px', minHeight: '100vh', background: 'linear-gradient(180deg, #1e293b 0%, #0f172a 100%)', borderRight: '1px solid #334155', position: 'fixed', top: 0, left: 0, bottom: 0, zIndex: 10, display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '24px 20px 16px' }}>
         <h1 style={{ fontSize: '22px', fontWeight: 'bold', color: '#f1f5f9' }}>📊 AI Admin</h1>
       </div>
-      <nav style={{ padding: '8px' }}>
+
+      <nav style={{ padding: '8px', flex: 1 }}>
         {links.map(link => {
           const active = pathname === link.href || pathname.startsWith(link.href + '/')
           return (
@@ -30,16 +44,29 @@ function Sidebar() {
           )
         })}
       </nav>
+
+      {/* Кнопка выхода */}
+      <div style={{ padding: '16px' }}>
+        <button
+          onClick={handleLogout}
+          style={{ width: '100%', padding: '10px', background: '#450a0a', border: '1px solid #7f1d1d', borderRadius: '8px', color: '#fca5a5', cursor: 'pointer', fontSize: '14px', fontWeight: '600' }}
+        >
+          🚪 Выйти
+        </button>
+      </div>
     </div>
   )
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname()
+  const isLogin = pathname === '/login'
+
   return (
     <html lang="ru">
       <body style={{ margin: 0, background: '#0f172a', color: '#e2e8f0', fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif' }}>
-        <Sidebar />
-        <div style={{ marginLeft: '260px', minHeight: '100vh', padding: '28px' }}>
+        {!isLogin && <Sidebar />}
+        <div style={{ marginLeft: isLogin ? '0' : '260px', minHeight: '100vh', padding: isLogin ? '0' : '28px' }}>
           {children}
         </div>
       </body>
