@@ -1,0 +1,490 @@
+Create sites page component
+bash
+
+cat > /home/claude/sites-page.tsx << 'ENDOFFILE'
+'use client'
+import { useState } from 'react'
+
+type Block = {
+  id: string
+  type: 'hero' | 'text' | 'features' | 'cta' | 'contacts'
+  content: Record<string, string>
+}
+
+type Site = {
+  id: string
+  name: string
+  description: string
+  status: 'draft' | 'published'
+  blocks: Block[]
+  createdAt: string
+}
+
+const BLOCK_TEMPLATES: Record<string, { label: string; icon: string; defaultContent: Record<string, string> }> = {
+  hero: {
+    label: 'Заголовок (Hero)',
+    icon: '🎯',
+    defaultContent: { title: 'Заголовок сайта', subtitle: 'Описание вашего продукта или услуги', buttonText: 'Начать' }
+  },
+  text: {
+    label: 'Текстовый блок',
+    icon: '📝',
+    defaultContent: { title: 'Заголовок раздела', text: 'Напишите ваш текст здесь...' }
+  },
+  features: {
+    label: 'Преимущества',
+    icon: '⭐',
+    defaultContent: { title: 'Наши преимущества', feature1: 'Преимущество 1', feature2: 'Преимущество 2', feature3: 'Преимущество 3' }
+  },
+  cta: {
+    label: 'Призыв к действию',
+    icon: '🚀',
+    defaultContent: { title: 'Готовы начать?', subtitle: 'Свяжитесь с нами сегодня', buttonText: 'Связаться' }
+  },
+  contacts: {
+    label: 'Контакты',
+    icon: '📞',
+    defaultContent: { title: 'Контакты', phone: '+7 (999) 000-00-00', email: 'info@example.com', address: 'Ваш адрес' }
+  },
+}
+
+export default function SitesPage() {
+  const [sites, setSites] = useState<Site[]>([
+    {
+      id: '1',
+      name: 'Мой первый сайт',
+      description: 'Лендинг для продукта',
+      status: 'published',
+      blocks: [],
+      createdAt: '21.05.2026'
+    }
+  ])
+  const [view, setView] = useState<'list' | 'editor'>('list')
+  const [activeSite, setActiveSite] = useState<Site | null>(null)
+  const [showNewSiteModal, setShowNewSiteModal] = useState(false)
+  const [newSiteName, setNewSiteName] = useState('')
+  const [newSiteDesc, setNewSiteDesc] = useState('')
+  const [editingBlock, setEditingBlock] = useState<Block | null>(null)
+  const [preview, setPreview] = useState(false)
+
+  const createSite = () => {
+    if (!newSiteName.trim()) return
+    const site: Site = {
+      id: Date.now().toString(),
+      name: newSiteName,
+      description: newSiteDesc,
+      status: 'draft',
+      blocks: [],
+      createdAt: new Date().toLocaleDateString('ru-RU')
+    }
+    setSites([...sites, site])
+    setNewSiteName('')
+    setNewSiteDesc('')
+    setShowNewSiteModal(false)
+  }
+
+  const openEditor = (site: Site) => {
+    setActiveSite({ ...site })
+    setView('editor')
+    setPreview(false)
+  }
+
+  const addBlock = (type: Block['type']) => {
+    if (!activeSite) return
+    const block: Block = {
+      id: Date.now().toString(),
+      type,
+      content: { ...BLOCK_TEMPLATES[type].defaultContent }
+    }
+    const updated = { ...activeSite, blocks: [...activeSite.blocks, block] }
+    setActiveSite(updated)
+    setSites(sites.map(s => s.id === updated.id ? updated : s))
+  }
+
+  const deleteBlock = (blockId: string) => {
+    if (!activeSite) return
+    const updated = { ...activeSite, blocks: activeSite.blocks.filter(b => b.id !== blockId) }
+    setActiveSite(updated)
+    setSites(sites.map(s => s.id === updated.id ? updated : s))
+  }
+
+  const updateBlock = (blockId: string, field: string, value: string) => {
+    if (!activeSite) return
+    const updated = {
+      ...activeSite,
+      blocks: activeSite.blocks.map(b =>
+        b.id === blockId ? { ...b, content: { ...b.content, [field]: value } } : b
+      )
+    }
+    setActiveSite(updated)
+    setSites(sites.map(s => s.id === updated.id ? updated : s))
+  }
+
+  const moveBlock = (blockId: string, dir: 'up' | 'down') => {
+    if (!activeSite) return
+    const blocks = [...activeSite.blocks]
+    const idx = blocks.findIndex(b => b.id === blockId)
+    if (dir === 'up' && idx === 0) return
+    if (dir === 'down' && idx === blocks.length - 1) return
+    const swap = dir === 'up' ? idx - 1 : idx + 1
+    ;[blocks[idx], blocks[swap]] = [blocks[swap], blocks[idx]]
+    const updated = { ...activeSite, blocks }
+    setActiveSite(updated)
+    setSites(sites.map(s => s.id === updated.id ? updated : s))
+  }
+
+  const toggleStatus = () => {
+    if (!activeSite) return
+    const updated = { ...activeSite, status: activeSite.status === 'draft' ? 'published' : 'draft' as 'draft' | 'published' }
+    setActiveSite(updated)
+    setSites(sites.map(s => s.id === updated.id ? updated : s))
+  }
+
+  const deleteSite = (id: string) => {
+    setSites(sites.filter(s => s.id !== id))
+  }
+
+  const renderBlockPreview = (block: Block) => {
+    const c = block.content
+    switch (block.type) {
+      case 'hero':
+        return (
+          <div style={{ background: 'linear-gradient(135deg, #1e3a8a, #3b82f6)', padding: '60px 40px', textAlign: 'center', borderRadius: '8px' }}>
+            <h1 style={{ fontSize: '36px', fontWeight: 'bold', color: 'white', marginBottom: '16px' }}>{c.title}</h1>
+            <p style={{ fontSize: '18px', color: '#bfdbfe', marginBottom: '24px' }}>{c.subtitle}</p>
+            <button style={{ background: 'white', color: '#1e3a8a', padding: '12px 28px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer' }}>{c.buttonText}</button>
+          </div>
+        )
+      case 'text':
+        return (
+          <div style={{ padding: '40px', background: '#1e293b', borderRadius: '8px' }}>
+            <h2 style={{ fontSize: '24px', fontWeight: 'bold', color: '#f1f5f9', marginBottom: '16px' }}>{c.title}</h2>
+            <p style={{ color: '#94a3b8', lineHeight: '1.7' }}>{c.text}</p>
+          </div>
+        )
+      case 'features':
+        return (
+          <div style={{ padding: '40px', background: '#0f172a', borderRadius: '8px' }}>
+            <h2 style={{ fontSize: '24px', fontWeight: 'bold', color: '#f1f5f9', textAlign: 'center', marginBottom: '28px' }}>{c.title}</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+              {[c.feature1, c.feature2, c.feature3].map((f, i) => (
+                <div key={i} style={{ background: '#1e293b', padding: '20px', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '28px', marginBottom: '12px' }}>⭐</div>
+                  <p style={{ color: '#e2e8f0' }}>{f}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      case 'cta':
+        return (
+          <div style={{ background: '#7c3aed', padding: '50px 40px', textAlign: 'center', borderRadius: '8px' }}>
+            <h2 style={{ fontSize: '28px', fontWeight: 'bold', color: 'white', marginBottom: '12px' }}>{c.title}</h2>
+            <p style={{ color: '#ddd6fe', marginBottom: '24px' }}>{c.subtitle}</p>
+            <button style={{ background: 'white', color: '#7c3aed', padding: '12px 28px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer' }}>{c.buttonText}</button>
+          </div>
+        )
+      case 'contacts':
+        return (
+          <div style={{ padding: '40px', background: '#1e293b', borderRadius: '8px' }}>
+            <h2 style={{ fontSize: '24px', fontWeight: 'bold', color: '#f1f5f9', marginBottom: '20px' }}>{c.title}</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <p style={{ color: '#94a3b8' }}>📞 {c.phone}</p>
+              <p style={{ color: '#94a3b8' }}>✉️ {c.email}</p>
+              <p style={{ color: '#94a3b8' }}>📍 {c.address}</p>
+            </div>
+          </div>
+        )
+    }
+  }
+
+  // ============= СПИСОК САЙТОВ =============
+  if (view === 'list') {
+    return (
+      <div>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+          <div>
+            <h1 style={{ fontSize: '28px', fontWeight: 'bold', color: '#f1f5f9' }}>🌐 Сайты</h1>
+            <p style={{ color: '#64748b', marginTop: '4px' }}>Создавайте и управляйте сайтами</p>
+          </div>
+          <button onClick={() => setShowNewSiteModal(true)} className="btn" style={{ fontSize: '15px', padding: '12px 20px' }}>
+            + Создать сайт
+          </button>
+        </div>
+
+        {/* Список сайтов */}
+        {sites.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '80px 20px', color: '#64748b' }}>
+            <div style={{ fontSize: '64px', marginBottom: '16px' }}>🌐</div>
+            <h3 style={{ fontSize: '20px', marginBottom: '8px', color: '#94a3b8' }}>Нет сайтов</h3>
+            <p style={{ marginBottom: '24px' }}>Создайте первый сайт чтобы начать</p>
+            <button onClick={() => setShowNewSiteModal(true)} className="btn">+ Создать сайт</button>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
+            {sites.map(site => (
+              <div key={site.id} className="stat-card" style={{ padding: '24px', cursor: 'pointer' }}>
+                {/* Превью */}
+                <div
+                  onClick={() => openEditor(site)}
+                  style={{ height: '140px', background: 'linear-gradient(135deg, #1e3a8a, #3b82f6)', borderRadius: '6px', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '40px' }}
+                >
+                  🌐
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#f1f5f9', marginBottom: '4px' }}>{site.name}</h3>
+                    <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '8px' }}>{site.description || 'Без описания'}</p>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <span style={{
+                        fontSize: '11px', padding: '3px 8px', borderRadius: '20px', fontWeight: '600',
+                        background: site.status === 'published' ? '#064e3b' : '#1e293b',
+                        color: site.status === 'published' ? '#34d399' : '#94a3b8',
+                        border: `1px solid ${site.status === 'published' ? '#065f46' : '#334155'}`
+                      }}>
+                        {site.status === 'published' ? '● Опубликован' : '○ Черновик'}
+                      </span>
+                      <span style={{ fontSize: '11px', color: '#475569' }}>{site.blocks.length} блоков</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+                  <button onClick={() => openEditor(site)} className="btn" style={{ flex: 1, justifyContent: 'center', fontSize: '13px', padding: '8px 12px' }}>
+                    ✏️ Редактировать
+                  </button>
+                  <button
+                    onClick={() => deleteSite(site.id)}
+                    style={{ padding: '8px 12px', background: '#450a0a', color: '#fca5a5', border: '1px solid #7f1d1d', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}
+                  >
+                    🗑️
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Модальное окно создания */}
+        {showNewSiteModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+            <div style={{ background: '#1e293b', borderRadius: '12px', padding: '32px', width: '440px', border: '1px solid #334155' }}>
+              <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: '#f1f5f9', marginBottom: '24px' }}>Новый сайт</h2>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>Название сайта *</label>
+                <input
+                  value={newSiteName}
+                  onChange={e => setNewSiteName(e.target.value)}
+                  placeholder="Например: Лендинг для кафе"
+                  style={{ width: '100%', padding: '10px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: '6px', color: '#f1f5f9', fontSize: '14px' }}
+                />
+              </div>
+              <div style={{ marginBottom: '24px' }}>
+                <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>Описание</label>
+                <input
+                  value={newSiteDesc}
+                  onChange={e => setNewSiteDesc(e.target.value)}
+                  placeholder="Краткое описание..."
+                  style={{ width: '100%', padding: '10px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: '6px', color: '#f1f5f9', fontSize: '14px' }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button onClick={createSite} className="btn" style={{ flex: 1, justifyContent: 'center' }}>Создать</button>
+                <button onClick={() => setShowNewSiteModal(false)} className="btn btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Отмена</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ============= РЕДАКТОР САЙТА =============
+  if (view === 'editor' && activeSite) {
+    return (
+      <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', marginLeft: '-20px', marginTop: '-20px' }}>
+
+        {/* Левая панель - блоки */}
+        <div style={{ width: '260px', background: '#0f172a', borderRight: '1px solid #1e293b', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+          {/* Назад */}
+          <div style={{ padding: '16px', borderBottom: '1px solid #1e293b' }}>
+            <button
+              onClick={() => setView('list')}
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#94a3b8', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', marginBottom: '12px' }}
+            >
+              ← Назад
+            </button>
+            <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#f1f5f9' }}>{activeSite.name}</h2>
+            <span style={{ fontSize: '11px', color: activeSite.status === 'published' ? '#34d399' : '#64748b' }}>
+              {activeSite.status === 'published' ? '● Опубликован' : '○ Черновик'}
+            </span>
+          </div>
+
+          {/* Добавить блок */}
+          <div style={{ padding: '16px', borderBottom: '1px solid #1e293b' }}>
+            <p style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>Добавить блок</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {Object.entries(BLOCK_TEMPLATES).map(([type, tmpl]) => (
+                <button
+                  key={type}
+                  onClick={() => addBlock(type as Block['type'])}
+                  style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', background: '#1e293b', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', cursor: 'pointer', fontSize: '13px', textAlign: 'left', transition: 'all 0.2s' }}
+                  onMouseOver={e => (e.currentTarget.style.borderColor = '#3b82f6')}
+                  onMouseOut={e => (e.currentTarget.style.borderColor = '#334155')}
+                >
+                  <span style={{ fontSize: '18px' }}>{tmpl.icon}</span>
+                  {tmpl.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Список блоков */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+            <p style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>
+              Блоки ({activeSite.blocks.length})
+            </p>
+            {activeSite.blocks.length === 0 ? (
+              <p style={{ fontSize: '13px', color: '#475569', textAlign: 'center', marginTop: '20px' }}>
+                Добавьте первый блок →
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {activeSite.blocks.map((block, idx) => (
+                  <div
+                    key={block.id}
+                    onClick={() => setEditingBlock(editingBlock?.id === block.id ? null : block)}
+                    style={{
+                      padding: '8px 10px', background: editingBlock?.id === block.id ? '#1e3a8a' : '#1e293b',
+                      border: `1px solid ${editingBlock?.id === block.id ? '#3b82f6' : '#334155'}`,
+                      borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                    }}
+                  >
+                    <span style={{ fontSize: '13px', color: '#e2e8f0' }}>
+                      {BLOCK_TEMPLATES[block.type].icon} {BLOCK_TEMPLATES[block.type].label}
+                    </span>
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <button onClick={e => { e.stopPropagation(); moveBlock(block.id, 'up') }} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '11px' }}>▲</button>
+                      <button onClick={e => { e.stopPropagation(); moveBlock(block.id, 'down') }} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '11px' }}>▼</button>
+                      <button onClick={e => { e.stopPropagation(); deleteBlock(block.id) }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '11px' }}>✕</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Кнопки снизу */}
+          <div style={{ padding: '16px', borderTop: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <button
+              onClick={toggleStatus}
+              style={{ padding: '10px', background: activeSite.status === 'published' ? '#064e3b' : '#1e3a8a', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontWeight: '600', fontSize: '13px' }}
+            >
+              {activeSite.status === 'published' ? '⏸ Снять с публикации' : '🚀 Опубликовать'}
+            </button>
+          </div>
+        </div>
+
+        {/* Центральная часть - превью */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0f172a', overflow: 'hidden' }}>
+          {/* Topbar редактора */}
+          <div style={{ padding: '12px 20px', background: '#1e293b', borderBottom: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => setPreview(false)}
+                style={{ padding: '6px 14px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '13px', background: !preview ? '#3b82f6' : '#334155', color: 'white' }}
+              >
+                ✏️ Редактор
+              </button>
+              <button
+                onClick={() => setPreview(true)}
+                style={{ padding: '6px 14px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '13px', background: preview ? '#3b82f6' : '#334155', color: 'white' }}
+              >
+                👁 Превью
+              </button>
+            </div>
+            <span style={{ fontSize: '13px', color: '#64748b' }}>
+              {activeSite.blocks.length} блоков
+            </span>
+          </div>
+
+          {/* Канвас */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+            {activeSite.blocks.length === 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#475569' }}>
+                <div style={{ fontSize: '64px', marginBottom: '16px' }}>🧩</div>
+                <h3 style={{ fontSize: '20px', color: '#64748b', marginBottom: '8px' }}>Страница пуста</h3>
+                <p style={{ fontSize: '14px' }}>Добавьте блоки из левой панели</p>
+              </div>
+            ) : (
+              <div style={{ maxWidth: '800px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {activeSite.blocks.map(block => (
+                  <div
+                    key={block.id}
+                    onClick={() => !preview && setEditingBlock(editingBlock?.id === block.id ? null : block)}
+                    style={{
+                      borderRadius: '8px', overflow: 'hidden', cursor: preview ? 'default' : 'pointer',
+                      border: `2px solid ${!preview && editingBlock?.id === block.id ? '#3b82f6' : 'transparent'}`,
+                      transition: 'border-color 0.2s'
+                    }}
+                  >
+                    {renderBlockPreview(block)}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Правая панель - настройки блока */}
+        {editingBlock && !preview && (
+          <div style={{ width: '280px', background: '#0f172a', borderLeft: '1px solid #1e293b', padding: '20px', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ fontSize: '15px', fontWeight: '600', color: '#f1f5f9' }}>
+                {BLOCK_TEMPLATES[editingBlock.type].icon} Настройки блока
+              </h3>
+              <button onClick={() => setEditingBlock(null)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '18px' }}>✕</button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {Object.entries(editingBlock.content).map(([field, value]) => (
+                <div key={field}>
+                  <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '6px', textTransform: 'capitalize' }}>
+                    {field === 'title' ? 'Заголовок' : field === 'subtitle' ? 'Подзаголовок' : field === 'text' ? 'Текст' : field === 'buttonText' ? 'Текст кнопки' : field === 'phone' ? 'Телефон' : field === 'email' ? 'Email' : field === 'address' ? 'Адрес' : field}
+                  </label>
+                  {field === 'text' ? (
+                    <textarea
+                      value={value}
+                      onChange={e => updateBlock(editingBlock.id, field, e.target.value)}
+                      rows={4}
+                      style={{ width: '100%', padding: '8px 10px', background: '#1e293b', border: '1px solid #334155', borderRadius: '6px', color: '#f1f5f9', fontSize: '13px', resize: 'vertical' }}
+                    />
+                  ) : (
+                    <input
+                      value={value}
+                      onChange={e => updateBlock(editingBlock.id, field, e.target.value)}
+                      style={{ width: '100%', padding: '8px 10px', background: '#1e293b', border: '1px solid #334155', borderRadius: '6px', color: '#f1f5f9', fontSize: '13px' }}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <button
+              onClick={() => deleteBlock(editingBlock.id)}
+              style={{ marginTop: '24px', width: '100%', padding: '10px', background: '#450a0a', border: '1px solid #7f1d1d', borderRadius: '6px', color: '#fca5a5', cursor: 'pointer', fontSize: '13px' }}
+            >
+              🗑️ Удалить блок
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return null
+}
+ENDOFFILE
+echo "✅ Файл создан!"
