@@ -788,30 +788,87 @@ export default function SitesPage() {
   )
 
   if (view === 'pages' && activeSite) return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '28px' }}>
-        <button onClick={() => setView('list')} style={btnStyle({ background: '#1e293b', border: '1px solid #334155', color: '#94a3b8' })}>← Назад</button>
-        <div style={{ flex: 1 }}>
-          <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#f1f5f9' }}>📄 {activeSite.name}</h1>
-          <p style={{ color: '#64748b', fontSize: '13px' }}>Страницы сайта</p>
+    <div style={{ background: '#f8fafc', minHeight: '100vh', margin: '-28px', padding: '0' }}>
+      {/* Топбар как в Tilda */}
+      <div style={{ background: 'white', borderBottom: '1px solid #e2e8f0', padding: '0 32px', display: 'flex', alignItems: 'center', gap: '0', height: '52px' }}>
+        <button onClick={() => setView('list')} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 20px 0 0', background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontSize: '14px', borderRight: '1px solid #e2e8f0', height: '100%' }}>
+          ← Назад
+        </button>
+        <div style={{ padding: '0 20px', flex: 1 }}>
+          <span style={{ fontSize: '15px', fontWeight: '600', color: '#0f172a' }}>{activeSite.name}</span>
+          {activeSite.domain && <span style={{ fontSize: '13px', color: '#64748b', marginLeft: '12px' }}>🔗 {activeSite.domain}</span>}
         </div>
-        <button onClick={() => setView('settings')} style={btnStyle({ background: '#334155' })}>⚙️ Настройки</button>
-        <button onClick={() => setShowNewPage(true)} style={btnStyle()}>+ Добавить страницу</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button onClick={async () => { const s = activeSite.status === 'draft' ? 'published' : 'draft'; await supabase.from('sites').update({ status: s }).eq('id', activeSite.id); setActiveSite({ ...activeSite, status: s as 'draft' | 'published' }); setSites(sites.map(x => x.id === activeSite.id ? { ...x, status: s as 'draft' | 'published' } : x)) }} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 16px', background: activeSite.status === 'published' ? '#dcfce7' : '#f1f5f9', border: `1px solid ${activeSite.status === 'published' ? '#86efac' : '#e2e8f0'}`, borderRadius: '6px', cursor: 'pointer', fontSize: '13px', color: activeSite.status === 'published' ? '#16a34a' : '#64748b', fontWeight: '600' }}>
+            {activeSite.status === 'published' ? '● Опубликован' : '○ Черновик'}
+          </button>
+          <button onClick={() => setView('settings')} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 16px', background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', color: '#64748b' }}>
+            ⚙️ Настройки
+          </button>
+          <button onClick={() => setShowNewPage(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 16px', background: '#f97316', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', color: 'white', fontWeight: '600' }}>
+            + Создать страницу
+          </button>
+        </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))', gap: '16px' }}>
-        {activeSite.pages.map(page => (
-          <div key={page.id} style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '10px', padding: '20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-              <div>
-                <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#f1f5f9', marginBottom: '4px' }}>{page.name}</h3>
-                <span style={{ fontSize: '12px', color: '#64748b', fontFamily: 'monospace', background: '#0f172a', padding: '2px 8px', borderRadius: '4px' }}>{page.slug}</span>
+
+      {/* Список страниц */}
+      <div style={{ padding: '32px', maxWidth: '900px' }}>
+        <p style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Страницы сайта:</p>
+
+        <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+          {activeSite.pages.map((page, idx) => (
+            <div key={page.id} style={{ display: 'flex', alignItems: 'center', padding: '16px 20px', borderBottom: idx < activeSite.pages.length - 1 ? '1px solid #f1f5f9' : 'none', transition: 'background 0.15s' }}
+              onMouseOver={e => e.currentTarget.style.background = '#fafafa'}
+              onMouseOut={e => e.currentTarget.style.background = 'white'}
+            >
+              {/* Превью миниатюра */}
+              <div onClick={() => { setActivePage(page); setView('editor') }} style={{ width: '72px', height: '54px', background: page.blocks?.length ? 'linear-gradient(135deg, #667eea, #764ba2)' : '#f1f5f9', borderRadius: '6px', marginRight: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, border: '1px solid #e2e8f0', overflow: 'hidden', position: 'relative' }}>
+                {page.blocks?.length ? (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', gap: '3px', padding: '6px' }}>
+                    <div style={{ height: '12px', background: 'rgba(255,255,255,0.6)', borderRadius: '2px' }} />
+                    <div style={{ height: '8px', background: 'rgba(255,255,255,0.4)', borderRadius: '2px', width: '70%' }} />
+                    <div style={{ height: '6px', background: 'rgba(255,255,255,0.3)', borderRadius: '2px', width: '50%' }} />
+                  </div>
+                ) : (
+                  <span style={{ fontSize: '20px' }}>📄</span>
+                )}
               </div>
-              {activeSite.pages.length > 1 && <button onClick={() => deletePage(page.id)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }}>🗑️</button>}
+
+              {/* Инфо страницы */}
+              <div style={{ flex: 1, cursor: 'pointer' }} onClick={() => { setActivePage(page); setView('editor') }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
+                  <h3 style={{ fontSize: '15px', fontWeight: '600', color: '#0f172a', margin: 0 }}>{page.name}</h3>
+                  {idx === 0 && <span style={{ fontSize: '11px', background: '#f0fdf4', color: '#16a34a', padding: '2px 8px', borderRadius: '20px', border: '1px solid #bbf7d0' }}>Главная</span>}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ fontSize: '12px', color: '#94a3b8', fontFamily: 'monospace' }}>{page.slug}</span>
+                  <span style={{ fontSize: '12px', color: '#cbd5e1' }}>•</span>
+                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>{page.blocks?.length || 0} блоков</span>
+                </div>
+              </div>
+
+              {/* Кнопки */}
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button onClick={() => { setActivePage(page); setView('editor') }} style={{ padding: '6px 14px', background: '#f97316', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>
+                  Редактировать
+                </button>
+                {activeSite.pages.length > 1 && (
+                  <button onClick={() => deletePage(page.id)} style={{ padding: '6px 10px', background: 'none', border: '1px solid #fee2e2', borderRadius: '6px', color: '#ef4444', cursor: 'pointer', fontSize: '13px' }}>
+                    🗑️
+                  </button>
+                )}
+              </div>
             </div>
-            <p style={{ fontSize: '13px', color: '#475569', marginBottom: '16px' }}>{page.blocks?.length || 0} блоков</p>
-            <button onClick={() => { setActivePage(page); setView('editor') }} style={btnStyle({ width: '100%' })}>✏️ Редактировать</button>
-          </div>
-        ))}
+          ))}
+        </div>
+
+        {/* Кнопка добавить страницу */}
+        <button onClick={() => setShowNewPage(true)} style={{ marginTop: '12px', width: '100%', padding: '14px', background: 'white', border: '2px dashed #e2e8f0', borderRadius: '12px', color: '#94a3b8', cursor: 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+          onMouseOver={e => { e.currentTarget.style.borderColor = '#f97316'; e.currentTarget.style.color = '#f97316' }}
+          onMouseOut={e => { e.currentTarget.style.borderColor = '#e2e8f0'; e.currentTarget.style.color = '#94a3b8' }}
+        >
+          + Добавить страницу
+        </button>
       </div>
       {showNewPage && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
