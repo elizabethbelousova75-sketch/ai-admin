@@ -805,7 +805,7 @@ export default function SitesPage() {
           <button onClick={() => setView('settings')} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 16px', background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', color: '#64748b' }}>
             ⚙️ Настройки
           </button>
-          <button onClick={() => setShowNewPage(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 16px', background: '#f97316', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', color: 'white', fontWeight: '600' }}>
+          <button onClick={() => setShowNewPage(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 16px', background: '#3b82f6', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', color: 'white', fontWeight: '600' }}>
             + Создать страницу
           </button>
         </div>
@@ -849,7 +849,7 @@ export default function SitesPage() {
 
               {/* Кнопки */}
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <button onClick={() => { setActivePage(page); setView('editor') }} style={{ padding: '6px 14px', background: '#f97316', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>
+                <button onClick={() => { setActivePage(page); setView('editor') }} style={{ padding: '6px 14px', background: '#3b82f6', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>
                   Редактировать
                 </button>
                 {activeSite.pages.length > 1 && (
@@ -864,7 +864,7 @@ export default function SitesPage() {
 
         {/* Кнопка добавить страницу */}
         <button onClick={() => setShowNewPage(true)} style={{ marginTop: '12px', width: '100%', padding: '14px', background: 'white', border: '2px dashed #e2e8f0', borderRadius: '12px', color: '#94a3b8', cursor: 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-          onMouseOver={e => { e.currentTarget.style.borderColor = '#f97316'; e.currentTarget.style.color = '#f97316' }}
+          onMouseOver={e => { e.currentTarget.style.borderColor = '#3b82f6'; e.currentTarget.style.color = '#3b82f6' }}
           onMouseOut={e => { e.currentTarget.style.borderColor = '#e2e8f0'; e.currentTarget.style.color = '#94a3b8' }}
         >
           + Добавить страницу
