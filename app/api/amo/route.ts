@@ -12,7 +12,7 @@ function randomPhone() {
 export async function POST(request: NextRequest) {
   const body = await request.json()
   if (body.action === 'submit_form') return submitForm(body.siteUrl)
-  if (body.action === 'find_lead')   return findLead(body.since)
+  if (body.action === 'find_lead')   return findLead(body.since, body.phone)
   if (body.action === 'close_lead')  return closeLead(body.leadId)
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
 }
@@ -66,8 +66,6 @@ async function submitForm(siteUrl: string) {
       signal: AbortSignal.timeout(4000),
     }).catch((e) => console.log('Form fetch error:', e.message))
 
-    console.log('Form submitted, action:', formAction, 'fields:', fieldNames.length)
-
     return NextResponse.json({
       ok: true,
       submittedAt,
@@ -76,30 +74,81 @@ async function submitForm(siteUrl: string) {
       testData: { name: BOT_NAME, phone, email: 'formtestbot@check.ru' },
     })
   } catch (e: any) {
-    console.log('submitForm error:', e.message)
     return NextResponse.json({ ok: false, error: e.message })
   }
 }
 
-async function findLead(since: number) {
+async function findLead(since: number, phone: string) {
   try {
-    const res = await fetch(
-      `https://${AMO_DOMAIN}/api/v4/leads?filter[created_at][from]=${since}&limit=20&order[created_at]=desc`,
+    // Ищем контакт по номеру телефона
+    const phoneClean = phone.replace(/\D/g, '')
+
+    const contactRes = await fetch(
+      `https://${AMO_DOMAIN}/api/v4/contacts?query=${encodeURIComponent(phone)}&limit=5`,
       { headers: { Authorization: `Bearer ${AMO_TOKEN}` }, signal: AbortSignal.timeout(6000) }
     )
-console.log('AmoCRM status:', res.status, res.headers.get('content-type'))
-const text = await res.text()
-console.log('AmoCRM response:', text.slice(0, 200))
-const data = JSON.parse(text)
+
+    if (contactRes.ok) {
+      const contactData = await contactRes.json()
+      const contacts = contactData._embedded?.contacts || []
+
+      console.log('Contacts found:', contacts.length)
+
+      // Ищем контакт с нашим номером
+      const contact = contacts.find((c: any) => {
+        const fields = c.custom_fields_values || []
+        return fields.some((f: any) =>
+          f.values?.some((v: any) => v.value?.replace(/\D/g, '').includes(phoneClean))
+        )
+      })
+
+      if (contact) {
+        // Получаем лиды этого контакта
+        const leadsRes = await fetch(
+          `https://${AMO_DOMAIN}/api/v4/contacts/${contact.id}/links`,
+          { headers: { Authorization: `Bearer ${AMO_TOKEN}` }, signal: AbortSignal.timeout(6000) }
+        )
+
+        if (leadsRes.ok) {
+          const leadsData = await leadsRes.json()
+          const leadLink = leadsData._embedded?.links?.find((l: any) => l.to_entity_type === 'leads')
+
+          if (leadLink) {
+            return NextResponse.json({
+              ok: true,
+              lead: { id: leadLink.to_entity_id, name: `FormTestBot (${phone})` },
+              leadUrl: `https://${AMO_DOMAIN}/leads/detail/${leadLink.to_entity_id}`,
+            })
+          }
+        }
+      }
+    }
+
+    // Фолбэк — ищем по времени создания + проверяем контакт по телефону
+    const res = await fetch(
+      `https://${AMO_DOMAIN}/api/v4/leads?filter[created_at][from]=${since}&limit=20&order[created_at]=desc&with=contacts`,
+      { headers: { Authorization: `Bearer ${AMO_TOKEN}` }, signal: AbortSignal.timeout(6000) }
+    )
+
     if (!res.ok) return NextResponse.json({ ok: false, error: `AmoCRM: ${res.status}` })
 
+    const data  = await res.json()
     const leads = data._embedded?.leads || []
 
-    console.log('Leads found:', leads.length, leads.map((l: any) => l.name))
+    console.log('Leads by time:', leads.length, leads.map((l: any) => l.name))
 
-    const lead = leads.find((l: any) => l.name?.includes('FormTestBot')) || null
+    // Ищем лид где контакт содержит наш номер телефона
+    const lead = leads.find((l: any) => {
+      const contacts = l._embedded?.contacts || []
+      return contacts.some((c: any) => {
+        const fields = c.custom_fields_values || []
+        return fields.some((f: any) =>
+          f.values?.some((v: any) => v.value?.replace(/\D/g, '').includes(phoneClean))
+        )
+      })
+    }) || leads[0] || null
 
-    if (!lead) return NextResponse.json({ ok: false, message: 'Лид FormTestBot не найден' })
+    if (!lead) return NextResponse.json({ ok: false, message: 'Лид не найден в AmoCRM' })
 
     return NextResponse.json({
       ok: true,
