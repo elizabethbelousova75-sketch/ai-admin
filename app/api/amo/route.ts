@@ -27,12 +27,10 @@ async function submitForm(siteUrl: string) {
     })
     const html = await res.text()
 
-    // Найти action формы
     const actionMatch = html.match(/<form[^>]*action=["']([^"']*)["'][^>]*>/i)
     const rawAction   = actionMatch?.[1] || ''
     const formAction  = rawAction.startsWith('http') ? rawAction : new URL(rawAction || '/', siteUrl).href
 
-    // Собрать поля
     const fieldNames = [
       ...[...html.matchAll(/<input[^>]*name=["']([^"']+)["'][^>]*/gi)].map(m => m[1]),
       ...[...html.matchAll(/<textarea[^>]*name=["']([^"']+)["'][^>]*/gi)].map(m => m[1]),
@@ -43,7 +41,9 @@ async function submitForm(siteUrl: string) {
 
     for (const f of fieldNames) {
       const l = f.toLowerCase()
-      if (l.includes('name') || l.includes('имя') || l.includes('fio') || l.includes('фио'))
+      if (l.includes('name') || l.includes('имя') || l.includes('fio') || l.includes('фио') ||
+          l.includes('fname') || l.includes('fullname') || l.includes('contact') ||
+          l.includes('клиент') || l.includes('user') || l.includes('person') || l.includes('client'))
         formData[f] = BOT_NAME
       else if (l.includes('phone') || l.includes('tel') || l.includes('телефон') || l.includes('моб'))
         formData[f] = phone
@@ -83,16 +83,19 @@ async function submitForm(siteUrl: string) {
 async function findLead(since: number) {
   try {
     const res = await fetch(
-      `https://${AMO_DOMAIN}/api/v4/leads?filter[created_at][from]=${since}&limit=10&order[created_at]=desc`,
+      `https://${AMO_DOMAIN}/api/v4/leads?filter[created_at][from]=${since}&limit=20&order[created_at]=desc`,
       { headers: { Authorization: `Bearer ${AMO_TOKEN}` }, signal: AbortSignal.timeout(6000) }
     )
 
     if (!res.ok) return NextResponse.json({ ok: false, error: `AmoCRM: ${res.status}` })
 
-    const data = await res.json()
-    const lead = data._embedded?.leads?.[0]
+    const data  = await res.json()
+    const leads = data._embedded?.leads || []
 
-    if (!lead) return NextResponse.json({ ok: false, message: 'Лид не найден' })
+    // Ищем лид с именем FormTestBot
+    const lead = leads.find((l: any) => l.name?.includes('FormTestBot')) || null
+
+    if (!lead) return NextResponse.json({ ok: false, message: 'Лид FormTestBot не найден — форма не отправилась или имя не совпало' })
 
     return NextResponse.json({
       ok: true,
