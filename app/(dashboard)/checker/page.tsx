@@ -147,7 +147,7 @@ export default function CheckerPage() {
     const findRes = await fetch('/api/amo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'find_lead', since: submittedAt }),
+      body: JSON.stringify({ action: 'find_lead', since: submittedAt, phone: testData?.phone || '' }),
     }).then(r => r.json()).catch(() => ({ ok: false, error: 'Ошибка поиска' }))
 
     if (!findRes.ok) {
