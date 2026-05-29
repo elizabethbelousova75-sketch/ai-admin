@@ -12,7 +12,7 @@ function randomPhone() {
 export async function POST(request: NextRequest) {
   const body = await request.json()
   if (body.action === 'submit_form') return submitForm(body.siteUrl)
-  if (body.action === 'find_lead')   return findLead(body.since, body.phone)
+  if (body.action === 'find_lead')   return findLead(body.phone)
   if (body.action === 'close_lead')  return closeLead(body.leadId)
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
 }
@@ -78,81 +78,50 @@ async function submitForm(siteUrl: string) {
   }
 }
 
-async function findLead(since: number, phone: string) {
+async function findLead(phone: string) {
   try {
-    // Ищем контакт по номеру телефона
+    if (!phone) return NextResponse.json({ ok: false, error: 'Номер телефона не передан' })
+
     const phoneClean = phone.replace(/\D/g, '')
 
+    // Ищем контакт по имени FormTestBot
     const contactRes = await fetch(
-      `https://${AMO_DOMAIN}/api/v4/contacts?query=${encodeURIComponent(phone)}&limit=5`,
+      `https://${AMO_DOMAIN}/api/v4/contacts?query=${encodeURIComponent(BOT_NAME)}&limit=20&with=leads`,
       { headers: { Authorization: `Bearer ${AMO_TOKEN}` }, signal: AbortSignal.timeout(6000) }
     )
 
-    if (contactRes.ok) {
-      const contactData = await contactRes.json()
-      const contacts = contactData._embedded?.contacts || []
+    if (!contactRes.ok) return NextResponse.json({ ok: false, error: `AmoCRM contacts: ${contactRes.status}` })
 
-      console.log('Contacts found:', contacts.length)
+    const contactData = await contactRes.json()
+    const contacts = contactData._embedded?.contacts || []
 
-      // Ищем контакт с нашим номером
-      const contact = contacts.find((c: any) => {
-        const fields = c.custom_fields_values || []
-        return fields.some((f: any) =>
-          f.values?.some((v: any) => v.value?.replace(/\D/g, '').includes(phoneClean))
-        )
-      })
+    console.log('FormTestBot contacts found:', contacts.length)
 
-      if (contact) {
-        // Получаем лиды этого контакта
-        const leadsRes = await fetch(
-          `https://${AMO_DOMAIN}/api/v4/contacts/${contact.id}/links`,
-          { headers: { Authorization: `Bearer ${AMO_TOKEN}` }, signal: AbortSignal.timeout(6000) }
-        )
+    // Ищем контакт с нашим номером телефона
+    const contact = contacts.find((c: any) => {
+      const fields = c.custom_fields_values || []
+      return fields.some((f: any) =>
+        f.field_code === 'PHONE' &&
+        f.values?.some((v: any) => v.value?.replace(/\D/g, '').includes(phoneClean))
+      )
+    })
 
-        if (leadsRes.ok) {
-          const leadsData = await leadsRes.json()
-          const leadLink = leadsData._embedded?.links?.find((l: any) => l.to_entity_type === 'leads')
-
-          if (leadLink) {
-            return NextResponse.json({
-              ok: true,
-              lead: { id: leadLink.to_entity_id, name: `FormTestBot (${phone})` },
-              leadUrl: `https://${AMO_DOMAIN}/leads/detail/${leadLink.to_entity_id}`,
-            })
-          }
-        }
-      }
+    if (!contact) {
+      console.log('Contact with phone not found, phone:', phoneClean)
+      return NextResponse.json({ ok: false, message: `Лид не найден. Форма возможно отправляется через JS (Тильда/квиз)` })
     }
 
-    // Фолбэк — ищем по времени создания + проверяем контакт по телефону
-    const res = await fetch(
-      `https://${AMO_DOMAIN}/api/v4/leads?filter[created_at][from]=${since}&limit=20&order[created_at]=desc&with=contacts`,
-      { headers: { Authorization: `Bearer ${AMO_TOKEN}` }, signal: AbortSignal.timeout(6000) }
-    )
+    console.log('Contact found:', contact.id)
 
-    if (!res.ok) return NextResponse.json({ ok: false, error: `AmoCRM: ${res.status}` })
+    // Берём последний лид этого контакта
+    const leads = contact._embedded?.leads || []
+    const lead = leads[leads.length - 1]
 
-    const data  = await res.json()
-    const leads = data._embedded?.leads || []
-
-    console.log('Leads by time:', leads.length, leads.map((l: any) => l.name))
-
-    // Ищем лид где контакт содержит наш номер телефона
-    const lead = leads.find((l: any) => {
-      const contacts = l._embedded?.contacts || []
-      return contacts.some((c: any) => {
-        const fields = c.custom_fields_values || []
-        return fields.some((f: any) =>
-          f.values?.some((v: any) => v.value?.replace(/\D/g, '').includes(phoneClean))
-        )
-      })
-    }) || leads[0] || null
-
-    if (!lead) return NextResponse.json({ ok: false, message: 'Лид не найден в AmoCRM' })
+    if (!lead) return NextResponse.json({ ok: false, message: 'Контакт найден, но лид не привязан' })
 
     return NextResponse.json({
       ok: true,
-      lead: { id: lead.id, name: lead.name, createdAt: lead.created_at },
+      lead: { id: lead.id, name: `FormTestBot (${phone})` },
       leadUrl: `https://${AMO_DOMAIN}/leads/detail/${lead.id}`,
     })
   } catch (e: any) {
