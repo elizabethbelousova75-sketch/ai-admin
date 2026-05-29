@@ -11,11 +11,9 @@ function randomPhone() {
 
 export async function POST(request: NextRequest) {
   const body = await request.json()
-
   if (body.action === 'submit_form') return submitForm(body.siteUrl)
   if (body.action === 'find_lead')   return findLead(body.since)
   if (body.action === 'close_lead')  return closeLead(body.leadId)
-
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
 }
 
@@ -23,16 +21,14 @@ async function submitForm(siteUrl: string) {
   try {
     const res  = await fetch(siteUrl, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
-      signal: AbortSignal.timeout(7000),
+      signal: AbortSignal.timeout(4000),
     })
     const html = await res.text()
 
-    // Найти action формы
     const actionMatch = html.match(/<form[^>]*action=["']([^"']*)["'][^>]*>/i)
     const rawAction   = actionMatch?.[1] || ''
     const formAction  = rawAction.startsWith('http') ? rawAction : new URL(rawAction || '/', siteUrl).href
 
-    // Собрать поля
     const fieldNames = [
       ...[...html.matchAll(/<input[^>]*name=["']([^"']+)["'][^>]*/gi)].map(m => m[1]),
       ...[...html.matchAll(/<textarea[^>]*name=["']([^"']+)["'][^>]*/gi)].map(m => m[1]),
@@ -43,7 +39,9 @@ async function submitForm(siteUrl: string) {
 
     for (const f of fieldNames) {
       const l = f.toLowerCase()
-      if (l.includes('name') || l.includes('имя') || l.includes('fio') || l.includes('фио'))
+      if (l.includes('name') || l.includes('имя') || l.includes('fio') || l.includes('фио') ||
+          l.includes('fname') || l.includes('fullname') || l.includes('contact') ||
+          l.includes('клиент') || l.includes('user') || l.includes('person') || l.includes('client'))
         formData[f] = BOT_NAME
       else if (l.includes('phone') || l.includes('tel') || l.includes('телефон') || l.includes('моб'))
         formData[f] = phone
@@ -66,8 +64,9 @@ async function submitForm(siteUrl: string) {
       },
       body: new URLSearchParams(formData).toString(),
       signal: AbortSignal.timeout(4000),
-    }).catch(() => null)
-    console.log('Form submitted, action:', formAction, 'fields:', fieldNames)
+    }).catch((e) => console.log('Form fetch error:', e.message))
+
+    console.log('Form submitted, action:', formAction, 'fields:', fieldNames.length)
 
     return NextResponse.json({
       ok: true,
@@ -77,6 +76,7 @@ async function submitForm(siteUrl: string) {
       testData: { name: BOT_NAME, phone, email: 'formtestbot@check.ru' },
     })
   } catch (e: any) {
+    console.log('submitForm error:', e.message)
     return NextResponse.json({ ok: false, error: e.message })
   }
 }
@@ -84,16 +84,20 @@ async function submitForm(siteUrl: string) {
 async function findLead(since: number) {
   try {
     const res = await fetch(
-      `https://${AMO_DOMAIN}/api/v4/leads?filter[created_at][from]=${since}&limit=10&order[created_at]=desc`,
+      `https://${AMO_DOMAIN}/api/v4/leads?filter[created_at][from]=${since}&limit=20&order[created_at]=desc`,
       { headers: { Authorization: `Bearer ${AMO_TOKEN}` }, signal: AbortSignal.timeout(6000) }
     )
 
     if (!res.ok) return NextResponse.json({ ok: false, error: `AmoCRM: ${res.status}` })
 
+    const data  = await res.json()
+    const leads = data._embedded?.leads || []
 
-const lead = leads.find((l: any) => l.name?.includes('FormTestBot')) || null
-if (!lead) return NextResponse.json({ ok: false, message: 'Лид FormTestBot не найден' })
+    console.log('Leads found:', leads.length, leads.map((l: any) => l.name))
 
+    const lead = leads.find((l: any) => l.name?.includes('FormTestBot')) || null
+
+    if (!lead) return NextResponse.json({ ok: false, message: 'Лид FormTestBot не найден' })
 
     return NextResponse.json({
       ok: true,
@@ -101,6 +105,7 @@ if (!lead) return NextResponse.json({ ok: false, message: 'Лид FormTestBot н
       leadUrl: `https://${AMO_DOMAIN}/leads/detail/${lead.id}`,
     })
   } catch (e: any) {
+    console.log('findLead error:', e.message)
     return NextResponse.json({ ok: false, error: e.message })
   }
 }
@@ -119,7 +124,6 @@ async function closeLead(leadId: number) {
       }),
       signal: AbortSignal.timeout(6000),
     })
-
     return NextResponse.json({ ok: res.ok, status: res.status })
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e.message })
