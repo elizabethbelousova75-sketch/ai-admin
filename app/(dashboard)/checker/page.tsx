@@ -95,7 +95,13 @@ export default function CheckerPage() {
 
     fetch(`/api/check?url=${encodeURIComponent(site.url)}`)
       .then(r => r.json())
-      .then(data => updCheck(site.id, { html: data, loading: { html: false } as any }))
+      .then(data => {
+        updCheck(site.id, { html: data, loading: { html: false } as any })
+        // Автозапуск проверки формы после HTML анализа
+        if (data.ok && data.forms?.count > 0) {
+          runFormCheck(site)
+        }
+      })
       .catch(() => updCheck(site.id, { html: { ok: false, error: 'Ошибка подключения' }, loading: { html: false } as any }))
 
     fetchSpeed(site.url, 'mobile').then(data => updCheck(site.id, { mobile: data || undefined, loading: { mobile: false } as any }))
