@@ -87,10 +87,12 @@ async function findLead(since: number) {
       `https://${AMO_DOMAIN}/api/v4/leads?filter[created_at][from]=${since}&limit=20&order[created_at]=desc`,
       { headers: { Authorization: `Bearer ${AMO_TOKEN}` }, signal: AbortSignal.timeout(6000) }
     )
-
+console.log('AmoCRM status:', res.status, res.headers.get('content-type'))
+const text = await res.text()
+console.log('AmoCRM response:', text.slice(0, 200))
+const data = JSON.parse(text)
     if (!res.ok) return NextResponse.json({ ok: false, error: `AmoCRM: ${res.status}` })
 
-    const data  = await res.json()
     const leads = data._embedded?.leads || []
 
     console.log('Leads found:', leads.length, leads.map((l: any) => l.name))
