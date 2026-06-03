@@ -13,6 +13,7 @@ const links = [
   { href: '/domains', label: 'Домены', icon: '🔗' },
   { href: '/integrations', label: 'Интеграции', icon: '🔌' },
   { href: '/checker', label: 'Проверка сайтов', icon: '🔍' },
+  { href: '/quizzes', label: 'Квизы', icon: '📋' },
   { href: '/settings', label: 'Настройки', icon: '⚙️' },
 ]
 
