@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 const MAX_TOKEN = process.env.MAX_BOT_TOKEN!;
-const MAX_API = "https://platform-api2.max.ru";
+const MAX_API = "https://platform-api.max.ru";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -131,7 +131,17 @@ async function notifyManager(chatId: number, answers: Record<string, string>, ph
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
+  console.log("MAX webhook body:", JSON.stringify(body));
 
+  try {
+    return await handleUpdate(body);
+  } catch (e: any) {
+    console.error("MAX webhook error:", e?.message, e?.stack);
+    return NextResponse.json({ ok: true }); // всегда 200, чтобы MAX не ретраил бесконечно
+  }
+}
+
+async function handleUpdate(body: any) {
   // --- Событие: пользователь запустил бота ---
   if (body.update_type === "bot_started") {
     const chatId = body.chat_id;
@@ -196,8 +206,11 @@ export async function POST(req: NextRequest) {
 
   // --- Событие: обычное сообщение (в т.ч. отправка контакта) ---
   if (body.update_type === "message_created") {
-    const chatId = body.message.recipient.chat_id;
-    const contact = body.message.body?.attachments?.find(
+    const chatId = body.message?.recipient?.chat_id;
+    if (!chatId) {
+      return NextResponse.json({ ok: true });
+    }
+    const contact = body.message?.body?.attachments?.find(
       (a: any) => a.type === "contact"
     );
 
