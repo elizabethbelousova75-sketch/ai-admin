@@ -1,0 +1,208 @@
+// app/api/max/webhook/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+const MAX_TOKEN = process.env.MAX_BOT_TOKEN!;
+const MAX_API = "https://platform-api.max.ru";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+const QUESTIONS = {
+  q1: {
+    text: "Подскажите, пожалуйста, примерную сумму Вашей задолженности?",
+    options: [
+      ["До 300 000 ₽", "q1_300k"],
+      ["300 000–500 000 ₽", "q1_500k"],
+      ["500 000–1 000 000 ₽", "q1_1m"],
+      ["Более 1 000 000 ₽", "q1_more"],
+    ],
+  },
+  q2: {
+    text: "Перед кем числится долг?",
+    options: [
+      ["Банки", "q2_banks"],
+      ["МФО", "q2_mfo"],
+      ["Налоговая / ЖКХ", "q2_tax"],
+      ["Несколько вариантов", "q2_mixed"],
+    ],
+  },
+  q3: {
+    text: "Есть ли сейчас просрочки, суды или исполнительные производства?",
+    options: [
+      ["Да, уже есть суды/приставы", "q3_court"],
+      ["Просрочки есть, судов пока нет", "q3_overdue"],
+      ["Плачу, но тяжело", "q3_paying"],
+      ["Хочу узнать заранее, до просрочек", "q3_early"],
+    ],
+  },
+  q4: {
+    text: "Есть ли у Вас официальный доход и имущество (квартира, машина) в собственности?",
+    options: [
+      ["Да", "q4_yes"],
+      ["Нет", "q4_no"],
+      ["Частично", "q4_partial"],
+    ],
+  },
+} as const;
+
+const STEP_ORDER = ["q1", "q2", "q3", "q4", "phone", "done"] as const;
+
+async function sendMessage(
+  chatId: number,
+  text: string,
+  keyboard?: { text: string; payload: string }[][]
+) {
+  const attachments = keyboard
+    ? [
+        {
+          type: "inline_keyboard",
+          payload: {
+            buttons: keyboard.map((row) =>
+              row.map((btn) => ({
+                type: "callback",
+                text: btn.text,
+                payload: btn.payload,
+              }))
+            ),
+          },
+        },
+      ]
+    : undefined;
+
+  await fetch(`${MAX_API}/messages?chat_id=${chatId}`, {
+    method: "POST",
+    headers: {
+      Authorization: MAX_TOKEN,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ text, attachments }),
+  });
+}
+
+async function askQuestion(chatId: number, step: keyof typeof QUESTIONS) {
+  const q = QUESTIONS[step];
+  await sendMessage(
+    chatId,
+    q.text,
+    q.options.map(([text, payload]) => [{ text, payload }])
+  );
+}
+
+async function askPhone(chatId: number) {
+  await sendMessage(chatId, "Спасибо! Чтобы специалист мог связаться с Вами для бесплатной консультации, поделитесь, пожалуйста, номером телефона.", [
+    [{ text: "📱 Отправить номер", payload: "request_contact" }],
+  ]);
+}
+
+function nextStep(step: string): string {
+  const idx = STEP_ORDER.indexOf(step as any);
+  return STEP_ORDER[idx + 1] ?? "done";
+}
+
+async function notifyManager(chatId: number, answers: Record<string, string>, phone: string) {
+  const MANAGER_CHAT_ID = process.env.MAX_MANAGER_CHAT_ID!;
+
+  const summary = `
+🆕 Новая заявка (chat_id: ${chatId})
+Сумма долга: ${answers.q1 ?? "-"}
+Кредиторы: ${answers.q2 ?? "-"}
+Ситуация: ${answers.q3 ?? "-"}
+Имущество/доход: ${answers.q4 ?? "-"}
+Телефон: ${phone}
+`.trim();
+
+  await sendMessage(Number(MANAGER_CHAT_ID), summary);
+}
+
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+
+  if (body.update_type === "bot_started") {
+    const chatId = body.chat_id;
+
+    await supabase.from("max_conversations").upsert({
+      chat_id: chatId,
+      user_id: body.user?.user_id,
+      current_step: "q1",
+      status: "bot",
+    });
+
+    await sendMessage(
+      chatId,
+      "Здравствуйте! 👋 Я бот-помощник по вопросам списания долгов и банкротства. Задам несколько вопросов, чтобы разобраться в Вашей ситуации, и передам диалог специалисту для бесплатной консультации."
+    );
+    await askQuestion(chatId, "q1");
+
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.update_type === "message_callback") {
+    const chatId = body.callback.message.recipient.chat_id;
+    const payload: string = body.callback.payload;
+
+    const { data: conv } = await supabase
+      .from("max_conversations")
+      .select("*")
+      .eq("chat_id", chatId)
+      .single();
+
+    if (!conv || conv.status !== "bot") {
+      return NextResponse.json({ ok: true });
+    }
+
+    const step = conv.current_step;
+    const updatedAnswers = { ...conv.answers, [step]: payload };
+    const next = nextStep(step);
+
+    await supabase
+      .from("max_conversations")
+      .update({ current_step: next, answers: updatedAnswers })
+      .eq("chat_id", chatId);
+
+    if (next === "phone") {
+      await askPhone(chatId);
+    } else if (next in QUESTIONS) {
+      await askQuestion(chatId, next as keyof typeof QUESTIONS);
+    }
+
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.update_type === "message_created") {
+    const chatId = body.message.recipient.chat_id;
+    const contact = body.message.body?.attachments?.find(
+      (a: any) => a.type === "contact"
+    );
+
+    const { data: conv } = await supabase
+      .from("max_conversations")
+      .select("*")
+      .eq("chat_id", chatId)
+      .single();
+
+    if (!conv) return NextResponse.json({ ok: true });
+
+    if (conv.current_step === "phone" && contact) {
+      const phone = contact.payload?.phone ?? contact.payload?.vcf_info;
+
+      await supabase
+        .from("max_conversations")
+        .update({ phone, current_step: "done", status: "waiting_manager" })
+        .eq("chat_id", chatId);
+
+      await sendMessage(
+        chatId,
+        "Спасибо! Ваша заявка принята ✅ В ближайшее время с Вами свяжется наш специалист прямо здесь, в этом чате."
+      );
+
+      await notifyManager(chatId, conv.answers, phone);
+    }
+
+    return NextResponse.json({ ok: true });
+  }
+
+  return NextResponse.json({ ok: true });
+}
