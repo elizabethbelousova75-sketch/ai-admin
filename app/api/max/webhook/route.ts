@@ -181,12 +181,23 @@ async function handleUpdate(body: any) {
   if (body.update_type === "bot_started") {
     const chatId = body.chat_id;
 
-    await supabase.from("max_conversations").upsert({
-      chat_id: chatId,
-      user_id: body.user?.user_id,
-      current_step: "q1",
-      status: "bot",
-    });
+    const { error: upsertError } = await supabase
+      .from("max_conversations")
+      .upsert(
+        {
+          chat_id: chatId,
+          user_id: body.user?.user_id,
+          current_step: "q1",
+          status: "bot",
+          answers: {},
+          phone: null,
+        },
+        { onConflict: "chat_id" }
+      );
+
+    if (upsertError) {
+      console.error("Supabase upsert error (bot_started):", upsertError);
+    }
 
     await sendMessage(
       chatId,
