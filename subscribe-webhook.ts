@@ -1,3 +1,4 @@
+export {};
 const MAX_TOKEN = "f9LHodD0cOIffzIlNDJxINGuPXicU6cUPhtQyAzN9jA862gZUeAiJcNVneBk6wjfIovozGkDhB__cSFghFUe";
 const WEBHOOK_URL = "https://bfl-ai-admin.vercel.app/api/max/webhook";
 
