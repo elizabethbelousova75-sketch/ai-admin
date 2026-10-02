@@ -3,12 +3,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 const MAX_TOKEN = process.env.MAX_BOT_TOKEN!;
-const MAX_API = "https://platform-api.max.ru";
+const MAX_API = "https://platform-api2.max.ru";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY! // service role — пишем из серверного кода
 );
+
+// ---------- Вопросы и варианты ответов ----------
 
 const QUESTIONS = {
   q1: {
@@ -49,6 +51,8 @@ const QUESTIONS = {
 } as const;
 
 const STEP_ORDER = ["q1", "q2", "q3", "q4", "phone", "done"] as const;
+
+// ---------- Вспомогательные функции отправки ----------
 
 async function sendMessage(
   chatId: number,
@@ -95,6 +99,10 @@ async function askPhone(chatId: number) {
   await sendMessage(chatId, "Спасибо! Чтобы специалист мог связаться с Вами для бесплатной консультации, поделитесь, пожалуйста, номером телефона.", [
     [{ text: "📱 Отправить номер", payload: "request_contact" }],
   ]);
+  // Примечание: для реальной кнопки "поделиться контактом" в MAX используется
+  // отдельный тип кнопки request_contact (не callback) — см. документацию
+  // dev.max.ru/docs-api/use-cases/sending-messages/keyboard. Уточни точный
+  // формат перед продакшеном, здесь оставлен поясняющий вариант.
 }
 
 function nextStep(step: string): string {
@@ -102,8 +110,10 @@ function nextStep(step: string): string {
   return STEP_ORDER[idx + 1] ?? "done";
 }
 
+// ---------- Уведомление менеджеру ----------
+
 async function notifyManager(chatId: number, answers: Record<string, string>, phone: string) {
-  const MANAGER_CHAT_ID = process.env.MAX_MANAGER_CHAT_ID!;
+  const MANAGER_CHAT_ID = process.env.MAX_MANAGER_CHAT_ID!; // служебный чат/группа менеджеров
 
   const summary = `
 🆕 Новая заявка (chat_id: ${chatId})
@@ -117,9 +127,12 @@ async function notifyManager(chatId: number, answers: Record<string, string>, ph
   await sendMessage(Number(MANAGER_CHAT_ID), summary);
 }
 
+// ---------- Основной обработчик ----------
+
 export async function POST(req: NextRequest) {
   const body = await req.json();
 
+  // --- Событие: пользователь запустил бота ---
   if (body.update_type === "bot_started") {
     const chatId = body.chat_id;
 
@@ -139,9 +152,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  // --- Событие: нажатие кнопки ---
   if (body.update_type === "message_callback") {
-    const chatId = body.callback.message.recipient.chat_id;
+    // "message" — соседнее поле с "callback" в объекте Update, а не вложено в него.
+    // Иногда message может отсутствовать — тогда берём user_id из callback
+    // (в диалоге один на один с ботом chat_id обычно совпадает с user_id).
+    const chatId =
+      body.message?.recipient?.chat_id ?? body.callback?.user?.user_id;
     const payload: string = body.callback.payload;
+
+    if (!chatId) {
+      return NextResponse.json({ ok: true });
+    }
 
     const { data: conv } = await supabase
       .from("max_conversations")
@@ -150,10 +172,11 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (!conv || conv.status !== "bot") {
+      // диалог уже передан менеджеру — бот больше не реагирует на кнопки
       return NextResponse.json({ ok: true });
     }
 
-    const step = conv.current_step;
+    const step = conv.current_step; // q1 | q2 | q3 | q4
     const updatedAnswers = { ...conv.answers, [step]: payload };
     const next = nextStep(step);
 
@@ -171,6 +194,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  // --- Событие: обычное сообщение (в т.ч. отправка контакта) ---
   if (body.update_type === "message_created") {
     const chatId = body.message.recipient.chat_id;
     const contact = body.message.body?.attachments?.find(
@@ -185,6 +209,7 @@ export async function POST(req: NextRequest) {
 
     if (!conv) return NextResponse.json({ ok: true });
 
+    // Если ждём телефон и пришёл контакт
     if (conv.current_step === "phone" && contact) {
       const phone = contact.payload?.phone ?? contact.payload?.vcf_info;
 
@@ -200,6 +225,9 @@ export async function POST(req: NextRequest) {
 
       await notifyManager(chatId, conv.answers, phone);
     }
+
+    // Если диалог уже у менеджера — бот молчит, просто логируем
+    // (менеджер отвечает вручную через кабинет MAX для бизнеса или отдельную админку)
 
     return NextResponse.json({ ok: true });
   }
