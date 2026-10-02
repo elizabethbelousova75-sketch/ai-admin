@@ -176,35 +176,40 @@ export async function POST(req: NextRequest) {
   }
 }
 
+async function startConversation(chatId: number, userId?: number) {
+  const { error: upsertError } = await supabase
+    .from("max_conversations")
+    .upsert(
+      {
+        chat_id: chatId,
+        user_id: userId,
+        current_step: "q1",
+        status: "bot",
+        answers: {},
+        phone: null,
+      },
+      { onConflict: "chat_id" }
+    );
+
+  if (upsertError) {
+    console.error("Supabase upsert error (startConversation):", upsertError);
+  }
+
+  await sendMessage(
+    chatId,
+    "Здравствуйте! 👋 Я бот-помощник по вопросам списания долгов и банкротства. Задам несколько вопросов, чтобы разобраться в Вашей ситуации, и передам диалог специалисту для бесплатной консультации."
+  );
+  await askQuestion(chatId, "q1");
+}
+
 async function handleUpdate(body: any) {
   // --- Событие: пользователь запустил бота ---
+  // MAX присылает это событие только один раз за всю историю чата (при первом
+  // запуске). При повторном обращении того же пользователя это событие не
+  // приходит повторно — см. fallback в message_created ниже.
   if (body.update_type === "bot_started") {
     const chatId = body.chat_id;
-
-    const { error: upsertError } = await supabase
-      .from("max_conversations")
-      .upsert(
-        {
-          chat_id: chatId,
-          user_id: body.user?.user_id,
-          current_step: "q1",
-          status: "bot",
-          answers: {},
-          phone: null,
-        },
-        { onConflict: "chat_id" }
-      );
-
-    if (upsertError) {
-      console.error("Supabase upsert error (bot_started):", upsertError);
-    }
-
-    await sendMessage(
-      chatId,
-      "Здравствуйте! 👋 Я бот-помощник по вопросам списания долгов и банкротства. Задам несколько вопросов, чтобы разобраться в Вашей ситуации, и передам диалог специалисту для бесплатной консультации."
-    );
-    await askQuestion(chatId, "q1");
-
+    await startConversation(chatId, body.user?.user_id);
     return NextResponse.json({ ok: true });
   }
 
@@ -266,7 +271,16 @@ async function handleUpdate(body: any) {
       .eq("chat_id", chatId)
       .single();
 
-    if (!conv) return NextResponse.json({ ok: true });
+    if (!conv) {
+      // Записи ещё нет — либо правда первое сообщение, либо bot_started не
+      // пришёл повторно для уже знакомого пользователя. Запускаем сценарий
+      // с начала, если это не отправка контакта (той у нас в принципе не
+      // может быть без активного диалога, но на всякий случай проверяем).
+      if (!contact) {
+        await startConversation(chatId, body.message?.sender?.user_id);
+      }
+      return NextResponse.json({ ok: true });
+    }
 
     // Если ждём телефон и пришёл контакт
     if (conv.current_step === "phone" && contact) {
