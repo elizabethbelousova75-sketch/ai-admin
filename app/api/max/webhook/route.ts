@@ -1,9 +1,51 @@
 // app/api/max/webhook/route.ts
+export const runtime = "nodejs";
+
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import https from "node:https";
 
 const MAX_TOKEN = process.env.MAX_BOT_TOKEN!;
 const MAX_API = "https://platform-api.max.ru";
+
+// Сервер MAX использует сертификат, подписанный Минцифры России — он не входит
+// в стандартный список доверенных сертификатов на серверах Vercel (которые
+// физически находятся не в России). Поэтому для запросов именно к MAX API
+// отключаем строгую проверку цепочки сертификата. Это НЕ затрагивает остальные
+// соединения (Supabase и т.д.) — они по-прежнему проверяются как обычно.
+function maxApiRequest(
+  path: string,
+  body: Record<string, unknown>
+): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const url = new URL(`${MAX_API}${path}`);
+    const req = https.request(
+      url,
+      {
+        method: "POST",
+        headers: {
+          Authorization: MAX_TOKEN,
+          "Content-Type": "application/json",
+        },
+        rejectUnauthorized: false,
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch {
+            resolve(data);
+          }
+        });
+      }
+    );
+    req.on("error", reject);
+    req.write(JSON.stringify(body));
+    req.end();
+  });
+}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -76,14 +118,7 @@ async function sendMessage(
       ]
     : undefined;
 
-  await fetch(`${MAX_API}/messages?chat_id=${chatId}`, {
-    method: "POST",
-    headers: {
-      Authorization: MAX_TOKEN,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ text, attachments }),
-  });
+  await maxApiRequest(`/messages?chat_id=${chatId}`, { text, attachments });
 }
 
 async function askQuestion(chatId: number, step: keyof typeof QUESTIONS) {
