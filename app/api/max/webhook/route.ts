@@ -9,10 +9,9 @@ const MAX_TOKEN = process.env.MAX_BOT_TOKEN!;
 const MAX_API = "https://platform-api.max.ru";
 
 // Сервер MAX использует сертификат, подписанный Минцифры России — он не входит
-// в стандартный список доверенных сертификатов на серверах Vercel (которые
-// физически находятся не в России). Поэтому для запросов именно к MAX API
-// отключаем строгую проверку цепочки сертификата. Это НЕ затрагивает остальные
-// соединения (Supabase и т.д.) — они по-прежнему проверяются как обычно.
+// в стандартный список доверенных сертификатов на серверах Vercel. Поэтому для
+// запросов именно к MAX API отключаем строгую проверку цепочки сертификата.
+// Остальные соединения (Supabase, amoCRM) проверяются как обычно.
 function maxApiRequest(
   path: string,
   body: Record<string, unknown>
@@ -56,6 +55,7 @@ const supabase = createClient(
 
 const QUESTIONS = {
   q1: {
+    title: "Сумма долга",
     text: "Подскажите, пожалуйста, примерную сумму Вашей задолженности?",
     options: [
       ["До 300 000 ₽", "q1_300k"],
@@ -65,6 +65,7 @@ const QUESTIONS = {
     ],
   },
   q2: {
+    title: "Кредиторы",
     text: "Перед кем числится долг?",
     options: [
       ["Банки", "q2_banks"],
@@ -74,6 +75,7 @@ const QUESTIONS = {
     ],
   },
   q3: {
+    title: "Ситуация с долгом",
     text: "Есть ли сейчас просрочки, суды или исполнительные производства?",
     options: [
       ["Да, уже есть суды/приставы", "q3_court"],
@@ -83,6 +85,7 @@ const QUESTIONS = {
     ],
   },
   q4: {
+    title: "Доход и имущество",
     text: "Есть ли у Вас официальный доход и имущество (квартира, машина) в собственности?",
     options: [
       ["Да", "q4_yes"],
@@ -92,9 +95,24 @@ const QUESTIONS = {
   },
 } as const;
 
+type QuestionKey = keyof typeof QUESTIONS;
+
+// payload кнопки -> читаемый текст ответа
+const LABELS: Record<string, string> = {};
+for (const q of Object.values(QUESTIONS)) {
+  for (const [label, payload] of q.options) {
+    LABELS[payload] = label;
+  }
+}
+
 const STEP_ORDER = ["q1", "q2", "q3", "q4", "phone", "done"] as const;
 
-// ---------- Вспомогательные функции отправки ----------
+function nextStep(step: string): string {
+  const idx = STEP_ORDER.indexOf(step as any);
+  return STEP_ORDER[idx + 1] ?? "done";
+}
+
+// ---------- Отправка сообщений в MAX ----------
 
 async function sendMessage(
   chatId: number,
@@ -121,7 +139,7 @@ async function sendMessage(
   await maxApiRequest(`/messages?chat_id=${chatId}`, { text, attachments });
 }
 
-async function askQuestion(chatId: number, step: keyof typeof QUESTIONS) {
+async function askQuestion(chatId: number, step: QuestionKey) {
   const q = QUESTIONS[step];
   await sendMessage(
     chatId,
@@ -131,42 +149,160 @@ async function askQuestion(chatId: number, step: keyof typeof QUESTIONS) {
 }
 
 async function askPhone(chatId: number) {
-  await sendMessage(chatId, "Спасибо! Чтобы специалист мог связаться с Вами для бесплатной консультации, поделитесь, пожалуйста, номером телефона.", [
-    [{ text: "📱 Отправить номер", payload: "request_contact" }],
-  ]);
-  // Примечание: для реальной кнопки "поделиться контактом" в MAX используется
-  // отдельный тип кнопки request_contact (не callback) — см. документацию
-  // dev.max.ru/docs-api/use-cases/sending-messages/keyboard. Уточни точный
-  // формат перед продакшеном, здесь оставлен поясняющий вариант.
+  await sendMessage(
+    chatId,
+    "Спасибо! Напишите, пожалуйста, Ваш номер телефона сообщением в чате — например, +7 900 123-45-67."
+  );
 }
 
-function nextStep(step: string): string {
-  const idx = STEP_ORDER.indexOf(step as any);
-  return STEP_ORDER[idx + 1] ?? "done";
+// Заменяет сообщение с вопросом: оставляет только выбранный ответ, кнопки убирает
+async function showChosenAnswer(
+  callbackId: string,
+  step: QuestionKey,
+  label: string
+) {
+  const res = await maxApiRequest(
+    `/answers?callback_id=${encodeURIComponent(callbackId)}`,
+    {
+      callback_id: callbackId,
+      message: {
+        text: `${QUESTIONS[step].text}\n\n✅ ${label}`,
+        attachments: [],
+      },
+    }
+  );
+  if (res && typeof res === "object" && (res.code || res.success === false)) {
+    console.error("MAX /answers error:", JSON.stringify(res));
+  }
 }
 
-// ---------- Уведомление менеджеру ----------
+// ---------- Телефон ----------
 
-async function notifyManager(chatId: number, answers: Record<string, string>, phone: string) {
-  const MANAGER_CHAT_ID = process.env.MAX_MANAGER_CHAT_ID!; // служебный чат/группа менеджеров
+function normalizePhone(raw: string): string | null {
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 11 && (digits[0] === "7" || digits[0] === "8")) {
+    return "+7" + digits.slice(1);
+  }
+  if (digits.length === 10) {
+    return "+7" + digits;
+  }
+  return null;
+}
 
-  const summary = `
-🆕 Новая заявка (chat_id: ${chatId})
-Сумма долга: ${answers.q1 ?? "-"}
-Кредиторы: ${answers.q2 ?? "-"}
-Ситуация: ${answers.q3 ?? "-"}
-Имущество/доход: ${answers.q4 ?? "-"}
-Телефон: ${phone}
-`.trim();
+// ---------- amoCRM ----------
 
-  await sendMessage(Number(MANAGER_CHAT_ID), summary);
+function formatAnswers(answers: Record<string, string>): string {
+  const lines: string[] = [];
+  (Object.keys(QUESTIONS) as QuestionKey[]).forEach((key, i) => {
+    const payload = answers[key];
+    lines.push(
+      `${i + 1}. ${QUESTIONS[key].title}: ${
+        payload ? LABELS[payload] ?? payload : "—"
+      }`
+    );
+  });
+  return lines.join("\n");
+}
+
+async function createAmoLead(opts: {
+  name: string;
+  phone: string;
+  chatId: number;
+  userId?: number;
+  answers: Record<string, string>;
+}) {
+  const rawDomain = process.env.AMO_DOMAIN;
+  const token = process.env.AMO_TOKEN;
+  if (!rawDomain || !token) {
+    console.error("AMO_DOMAIN / AMO_TOKEN не заданы — заявка в amoCRM не создана");
+    return;
+  }
+  const domain = rawDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+
+  const lead: Record<string, unknown> = {
+    name: "Заявка из MAX-бота",
+    _embedded: {
+      contacts: [
+        {
+          first_name: opts.name || "Клиент из MAX",
+          custom_fields_values: [
+            {
+              field_code: "PHONE",
+              values: [{ value: opts.phone, enum_code: "WORK" }],
+            },
+          ],
+        },
+      ],
+      tags: [{ name: "MAX-бот" }],
+    },
+  };
+  if (process.env.AMO_PIPELINE_ID) {
+    lead.pipeline_id = Number(process.env.AMO_PIPELINE_ID);
+  }
+  if (process.env.AMO_STATUS_ID) {
+    lead.status_id = Number(process.env.AMO_STATUS_ID);
+  }
+
+  const res = await fetch(`https://${domain}/api/v4/leads/complex`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify([lead]),
+  });
+  const data: any = await res.json().catch(() => null);
+  const leadId = Array.isArray(data) ? data[0]?.id : undefined;
+
+  if (!res.ok || !leadId) {
+    console.error("amoCRM: сделка не создана", res.status, JSON.stringify(data));
+    return;
+  }
+
+  const noteText = [
+    "Заявка из MAX-бота",
+    "",
+    formatAnswers(opts.answers),
+    "",
+    `Телефон: ${opts.phone}`,
+    `MAX: chat_id ${opts.chatId}${opts.userId ? `, user_id ${opts.userId}` : ""}`,
+  ].join("\n");
+
+  const noteRes = await fetch(`https://${domain}/api/v4/leads/${leadId}/notes`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify([{ note_type: "common", params: { text: noteText } }]),
+  });
+  if (!noteRes.ok) {
+    console.error("amoCRM: примечание не добавлено", noteRes.status);
+  }
+}
+
+// ---------- Уведомление менеджеру (необязательно) ----------
+
+async function notifyManager(
+  chatId: number,
+  answers: Record<string, string>,
+  phone: string
+) {
+  const managerChatId = process.env.MAX_MANAGER_CHAT_ID;
+  if (!managerChatId) return;
+
+  const summary = [
+    `🆕 Новая заявка (chat_id: ${chatId})`,
+    formatAnswers(answers),
+    `Телефон: ${phone}`,
+  ].join("\n");
+
+  await sendMessage(Number(managerChatId), summary);
 }
 
 // ---------- Основной обработчик ----------
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  console.log("MAX webhook body:", JSON.stringify(body));
+  console.log("MAX update:", body?.update_type);
 
   try {
     return await handleUpdate(body);
@@ -203,26 +339,20 @@ async function startConversation(chatId: number, userId?: number) {
 }
 
 async function handleUpdate(body: any) {
-  // --- Событие: пользователь запустил бота ---
-  // MAX присылает это событие только один раз за всю историю чата (при первом
-  // запуске). При повторном обращении того же пользователя это событие не
-  // приходит повторно — см. fallback в message_created ниже.
+  // --- Пользователь запустил бота (MAX шлёт это только при самом первом запуске) ---
   if (body.update_type === "bot_started") {
-    const chatId = body.chat_id;
-    await startConversation(chatId, body.user?.user_id);
+    await startConversation(body.chat_id, body.user?.user_id);
     return NextResponse.json({ ok: true });
   }
 
-  // --- Событие: нажатие кнопки ---
+  // --- Нажатие кнопки ---
   if (body.update_type === "message_callback") {
-    // "message" — соседнее поле с "callback" в объекте Update, а не вложено в него.
-    // Иногда message может отсутствовать — тогда берём user_id из callback
-    // (в диалоге один на один с ботом chat_id обычно совпадает с user_id).
     const chatId =
       body.message?.recipient?.chat_id ?? body.callback?.user?.user_id;
-    const payload: string = body.callback.payload;
+    const payload: string | undefined = body.callback?.payload;
+    const callbackId: string | undefined = body.callback?.callback_id;
 
-    if (!chatId) {
+    if (!chatId || !payload || !callbackId) {
       return NextResponse.json({ ok: true });
     }
 
@@ -233,37 +363,54 @@ async function handleUpdate(body: any) {
       .single();
 
     if (!conv || conv.status !== "bot") {
-      // диалог уже передан менеджеру — бот больше не реагирует на кнопки
       return NextResponse.json({ ok: true });
     }
 
-    const step = conv.current_step; // q1 | q2 | q3 | q4
+    const step: string = conv.current_step;
+
+    // Кнопка от старого вопроса или повторное нажатие — игнорируем
+    if (!(step in QUESTIONS) || !payload.startsWith(`${step}_`)) {
+      return NextResponse.json({ ok: true });
+    }
+
     const updatedAnswers = { ...conv.answers, [step]: payload };
     const next = nextStep(step);
 
-    await supabase
+    // Обновляем только если шаг ещё не сменился — защита от двойной обработки
+    const { data: updated } = await supabase
       .from("max_conversations")
       .update({ current_step: next, answers: updatedAnswers })
-      .eq("chat_id", chatId);
+      .eq("chat_id", chatId)
+      .eq("current_step", step)
+      .select();
+
+    if (!updated || updated.length === 0) {
+      return NextResponse.json({ ok: true });
+    }
+
+    // В сообщении с вопросом оставляем только выбранный ответ
+    await showChosenAnswer(
+      callbackId,
+      step as QuestionKey,
+      LABELS[payload] ?? payload
+    );
 
     if (next === "phone") {
       await askPhone(chatId);
     } else if (next in QUESTIONS) {
-      await askQuestion(chatId, next as keyof typeof QUESTIONS);
+      await askQuestion(chatId, next as QuestionKey);
     }
 
     return NextResponse.json({ ok: true });
   }
 
-  // --- Событие: обычное сообщение (в т.ч. отправка контакта) ---
+  // --- Обычное сообщение (в том числе номер телефона текстом) ---
   if (body.update_type === "message_created") {
     const chatId = body.message?.recipient?.chat_id;
-    if (!chatId) {
+    if (!chatId || body.message?.sender?.is_bot) {
       return NextResponse.json({ ok: true });
     }
-    const contact = body.message?.body?.attachments?.find(
-      (a: any) => a.type === "contact"
-    );
+    const text: string = (body.message?.body?.text ?? "").trim();
 
     const { data: conv } = await supabase
       .from("max_conversations")
@@ -271,37 +418,60 @@ async function handleUpdate(body: any) {
       .eq("chat_id", chatId)
       .single();
 
+    // Записи нет — запускаем сценарий с начала
     if (!conv) {
-      // Записи ещё нет — либо правда первое сообщение, либо bot_started не
-      // пришёл повторно для уже знакомого пользователя. Запускаем сценарий
-      // с начала, если это не отправка контакта (той у нас в принципе не
-      // может быть без активного диалога, но на всякий случай проверяем).
-      if (!contact) {
-        await startConversation(chatId, body.message?.sender?.user_id);
-      }
+      await startConversation(chatId, body.message?.sender?.user_id);
       return NextResponse.json({ ok: true });
     }
 
-    // Если ждём телефон и пришёл контакт
-    if (conv.current_step === "phone" && contact) {
-      const phone = contact.payload?.phone ?? contact.payload?.vcf_info;
+    // Ждём телефон — человек пишет его сам
+    if (conv.status === "bot" && conv.current_step === "phone") {
+      const phone = normalizePhone(text);
 
-      await supabase
+      if (!phone) {
+        await sendMessage(
+          chatId,
+          "Не получилось распознать номер. Напишите, пожалуйста, в формате +7 900 123-45-67."
+        );
+        return NextResponse.json({ ok: true });
+      }
+
+      const { data: updated } = await supabase
         .from("max_conversations")
         .update({ phone, current_step: "done", status: "waiting_manager" })
-        .eq("chat_id", chatId);
+        .eq("chat_id", chatId)
+        .eq("current_step", "phone")
+        .select();
+
+      if (!updated || updated.length === 0) {
+        return NextResponse.json({ ok: true });
+      }
 
       await sendMessage(
         chatId,
         "Спасибо! Ваша заявка принята ✅ В ближайшее время с Вами свяжется наш специалист прямо здесь, в этом чате."
       );
 
-      await notifyManager(chatId, conv.answers, phone);
+      try {
+        await createAmoLead({
+          name: body.message?.sender?.name ?? "",
+          phone,
+          chatId,
+          userId: body.message?.sender?.user_id,
+          answers: conv.answers,
+        });
+      } catch (e: any) {
+        console.error("amoCRM error:", e?.message);
+      }
+
+      try {
+        await notifyManager(chatId, conv.answers, phone);
+      } catch (e: any) {
+        console.error("notifyManager error:", e?.message);
+      }
     }
 
-    // Если диалог уже у менеджера — бот молчит, просто логируем
-    // (менеджер отвечает вручную через кабинет MAX для бизнеса или отдельную админку)
-
+    // Если диалог уже у менеджера — бот молчит
     return NextResponse.json({ ok: true });
   }
 
