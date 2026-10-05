@@ -3,6 +3,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import https from "node:https";
+import { CITIES } from "./cities";
+import type { City } from "./cities";
 
 const MAX_API = "https://platform-api.max.ru";
 
@@ -125,6 +127,83 @@ function nextStep(step: string): string {
   return STEP_ORDER[idx + 1] ?? "done";
 }
 
+// ---------- Город и воронки amoCRM ----------
+
+const CITY_QUESTION = "В каком городе Вы находитесь?";
+const CITY_OTHER_PAYLOAD = "city_other";
+
+function norm(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/[^a-zа-я0-9]+/g, " ")
+    .trim()
+    .replace(/^(г|город)\s+/, "");
+}
+
+// ключ встречается в начале слова (так подходят «Казани», «в Казани»)
+function hasKey(text: string, key: string): boolean {
+  return (" " + text).includes(" " + key);
+}
+
+// Ключи для поиска: название, псевдонимы и основа без последней буквы («Самар» ловит «в Самаре»)
+function cityKeys(c: City): string[] {
+  const keys: string[] = [];
+  for (const name of [c.label, ...(c.aliases ?? [])]) {
+    const k = norm(name);
+    if (k.length < 2) continue;
+    keys.push(k);
+    if (!k.includes(" ") && k.length >= 5) keys.push(k.slice(0, -1));
+  }
+  return keys;
+}
+
+// Ищем город из списка по тому, что написал клиент
+function matchCity(typed: string): City | undefined {
+  const t = norm(typed);
+  if (!t) return undefined;
+  const exact = CITIES.find((c) => cityKeys(c).includes(t));
+  if (exact) return exact;
+  return CITIES.find((c) => cityKeys(c).some((k) => hasKey(t, k)));
+}
+
+type Pipeline = { id: number; name: string };
+let pipelineCache: { at: number; list: Pipeline[] } | null = null;
+
+async function amoPipelines(
+  domain: string,
+  headers: Record<string, string>
+): Promise<Pipeline[]> {
+  if (pipelineCache && Date.now() - pipelineCache.at < 10 * 60 * 1000) {
+    return pipelineCache.list;
+  }
+  const res = await fetch(`https://${domain}/api/v4/leads/pipelines`, { headers });
+  const data: any = await res.json().catch(() => null);
+  const list: Pipeline[] = (data?._embedded?.pipelines ?? []).map((p: any) => ({
+    id: Number(p.id),
+    name: String(p.name),
+  }));
+  if (res.ok && list.length) pipelineCache = { at: Date.now(), list };
+  return list;
+}
+
+async function pipelineForCity(
+  city: City,
+  domain: string,
+  headers: Record<string, string>
+): Promise<{ pipelineId?: number; statusId?: number }> {
+  if (city.pipelineId) {
+    return { pipelineId: city.pipelineId, statusId: city.statusId };
+  }
+  const list = await amoPipelines(domain, headers);
+  const keys = cityKeys(city);
+  const found = list.find((p) => {
+    const n = norm(p.name);
+    return keys.some((k) => hasKey(n, k));
+  });
+  return found ? { pipelineId: found.id, statusId: city.statusId } : {};
+}
+
 // ---------- Отправка сообщений в MAX ----------
 
 async function sendMessage(
@@ -171,11 +250,22 @@ async function askPhone(bot: Bot, chatId: number) {
   );
 }
 
+async function askCity(bot: Bot, chatId: number) {
+  await sendMessage(bot, chatId, CITY_QUESTION, [
+    ...CITIES.map((c) => [{ text: c.label, payload: `city_${c.label}` }]),
+    [{ text: "Другой город", payload: CITY_OTHER_PAYLOAD }],
+  ]);
+}
+
+async function askCityText(bot: Bot, chatId: number) {
+  await sendMessage(bot, chatId, "Напишите, пожалуйста, название Вашего города.");
+}
+
 // Заменяет сообщение с вопросом: оставляет только выбранный ответ, кнопки убирает
 async function showChosenAnswer(
   bot: Bot,
   callbackId: string,
-  step: QuestionKey,
+  questionText: string,
   label: string
 ) {
   const res = await maxApiRequest(
@@ -184,7 +274,7 @@ async function showChosenAnswer(
     {
       callback_id: callbackId,
       message: {
-        text: `${QUESTIONS[step].text}\n\n✅ ${label}`,
+        text: `${questionText}\n\n✅ ${label}`,
         attachments: [],
       },
     }
@@ -211,6 +301,7 @@ function normalizePhone(raw: string): string | null {
 
 function formatAnswers(answers: Record<string, string>): string {
   const lines: string[] = [];
+  if (answers.city) lines.push(`Город: ${answers.city}`);
   (Object.keys(QUESTIONS) as QuestionKey[]).forEach((key, i) => {
     const payload = answers[key];
     lines.push(
@@ -232,6 +323,13 @@ async function createAmoLead(
     answers: Record<string, string>;
   }
 ) {
+  // Прямое создание сделок отключено: заявки в amoCRM передаёт интеграция.
+  // Чтобы включить обратно, добавьте в Vercel переменную AMO_DIRECT_LEADS = on
+  if (process.env.AMO_DIRECT_LEADS !== "on") {
+    console.log("amoCRM: прямое создание сделок отключено, заявка сохранена только в базе");
+    return;
+  }
+
   const rawDomain = process.env.AMO_DOMAIN;
   const token = process.env.AMO_TOKEN;
   if (!rawDomain || !token) {
@@ -244,51 +342,103 @@ async function createAmoLead(
     "Content-Type": "application/json",
   };
 
-  const lead: Record<string, unknown> = {
-    name: `Заявка из MAX-бота (${bot.slug})`,
-    _embedded: {
-      contacts: [
-        {
-          first_name: opts.name || "Клиент из MAX",
-          custom_fields_values: [
-            {
-              field_code: "PHONE",
-              values: [{ value: opts.phone, enum_code: "WORK" }],
-            },
-          ],
-        },
-      ],
-      tags: [{ name: "MAX-бот" }, { name: `MAX: ${bot.slug}` }],
-    },
+  // Город из списка (для него настроена воронка)
+  const cityCfg = opts.answers.city
+    ? CITIES.find((c) => c.label === opts.answers.city)
+    : undefined;
+
+  const envPipeline = process.env.AMO_PIPELINE_ID
+    ? Number(process.env.AMO_PIPELINE_ID)
+    : undefined;
+  const envStatus = process.env.AMO_STATUS_ID
+    ? Number(process.env.AMO_STATUS_ID)
+    : undefined;
+
+  const buildLead = (pipelineId?: number, statusId?: number) => {
+    const tags = [{ name: "MAX-бот" }, { name: `MAX: ${bot.slug}` }];
+    if (cityCfg) tags.push({ name: cityCfg.label });
+    const lead: Record<string, unknown> = {
+      name: `Заявка из MAX-бота (${bot.slug})`,
+      _embedded: {
+        contacts: [
+          {
+            first_name: opts.name || "Клиент из MAX",
+            custom_fields_values: [
+              {
+                field_code: "PHONE",
+                values: [{ value: opts.phone, enum_code: "WORK" }],
+              },
+            ],
+          },
+        ],
+        tags,
+      },
+    };
+    if (pipelineId) lead.pipeline_id = pipelineId;
+    if (statusId) lead.status_id = statusId;
+    return lead;
   };
-  if (process.env.AMO_PIPELINE_ID) {
-    lead.pipeline_id = Number(process.env.AMO_PIPELINE_ID);
-  }
-  if (process.env.AMO_STATUS_ID) {
-    lead.status_id = Number(process.env.AMO_STATUS_ID);
+
+  const postLead = async (lead: Record<string, unknown>) => {
+    const res = await fetch(`https://${domain}/api/v4/leads/complex`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify([lead]),
+    });
+    const data: any = await res.json().catch(() => null);
+    const leadId: number | undefined = Array.isArray(data) ? data[0]?.id : undefined;
+    return { ok: res.ok && !!leadId, status: res.status, data, leadId };
+  };
+
+  // Воронка по городу
+  let routing: { pipelineId?: number; statusId?: number } = {};
+  if (cityCfg) {
+    try {
+      routing = await pipelineForCity(cityCfg, domain, headers);
+    } catch (e: any) {
+      console.error("amoCRM: не удалось получить воронки", e?.message);
+    }
+    if (!routing.pipelineId) {
+      console.error(
+        `amoCRM: для города "${cityCfg.label}" воронка не найдена — используем воронку по умолчанию`
+      );
+    }
   }
 
-  const res = await fetch(`https://${domain}/api/v4/leads/complex`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify([lead]),
-  });
-  const data: any = await res.json().catch(() => null);
-  const leadId = Array.isArray(data) ? data[0]?.id : undefined;
+  let result = await postLead(
+    buildLead(
+      routing.pipelineId ?? envPipeline,
+      routing.pipelineId ? routing.statusId : envStatus
+    )
+  );
+  let routingNote = "";
 
-  if (!res.ok || !leadId) {
-    console.error("amoCRM: сделка не создана", res.status, JSON.stringify(data));
+  // Если сделка в воронку города не создалась, не теряем заявку: кладём в воронку по умолчанию
+  if (!result.ok && routing.pipelineId) {
+    console.error(
+      "amoCRM: сделка в воронку города не создалась, пробуем воронку по умолчанию",
+      result.status,
+      JSON.stringify(result.data)
+    );
+    result = await postLead(buildLead(envPipeline, envStatus));
+    routingNote = `\n⚠️ Воронка города «${cityCfg?.label}» не применилась, сделка создана в воронке по умолчанию.`;
+  }
+
+  if (!result.ok || !result.leadId) {
+    console.error("amoCRM: сделка не создана", result.status, JSON.stringify(result.data));
     return;
   }
+  const leadId = result.leadId;
 
-  const noteText = [
-    `Заявка из MAX-бота (${bot.slug})`,
-    "",
-    formatAnswers(opts.answers),
-    "",
-    `Телефон: ${opts.phone}`,
-    `MAX: chat_id ${opts.chatId}${opts.userId ? `, user_id ${opts.userId}` : ""}`,
-  ].join("\n");
+  const noteText =
+    [
+      `Заявка из MAX-бота (${bot.slug})`,
+      "",
+      formatAnswers(opts.answers),
+      "",
+      `Телефон: ${opts.phone}`,
+      `MAX: chat_id ${opts.chatId}${opts.userId ? `, user_id ${opts.userId}` : ""}`,
+    ].join("\n") + routingNote;
 
   const noteRes = await fetch(`https://${domain}/api/v4/leads/${leadId}/notes`, {
     method: "POST",
@@ -356,7 +506,7 @@ async function startConversation(bot: Bot, chatId: number, userId?: number) {
       {
         chat_id: chatId,
         user_id: userId,
-        current_step: "q1",
+        current_step: CITIES.length ? "city" : "q1",
         status: "bot",
         answers: {},
         phone: null,
@@ -373,7 +523,11 @@ async function startConversation(bot: Bot, chatId: number, userId?: number) {
     chatId,
     "Здравствуйте! 👋 Я бот-помощник по вопросам списания долгов и банкротства. Задам несколько вопросов, чтобы разобраться в Вашей ситуации, и передам диалог специалисту для бесплатной консультации."
   );
-  await askQuestion(bot, chatId, "q1");
+  if (CITIES.length) {
+    await askCity(bot, chatId);
+  } else {
+    await askQuestion(bot, chatId, "q1");
+  }
 }
 
 async function handleUpdate(bot: Bot, body: any) {
@@ -406,6 +560,45 @@ async function handleUpdate(bot: Bot, body: any) {
 
     const step: string = conv.current_step;
 
+    // Шаг «город»: выбрана кнопка с городом или «Другой город»
+    if (step === "city") {
+      if (!payload.startsWith("city_")) {
+        return NextResponse.json({ ok: true });
+      }
+
+      if (payload === CITY_OTHER_PAYLOAD) {
+        const { data: moved } = await db()
+          .from("max_conversations")
+          .update({ current_step: "city_text" })
+          .eq("chat_id", chatId)
+          .eq("current_step", "city")
+          .select();
+        if (!moved || moved.length === 0) return NextResponse.json({ ok: true });
+
+        await showChosenAnswer(bot, callbackId, CITY_QUESTION, "Другой город");
+        await askCityText(bot, chatId);
+        return NextResponse.json({ ok: true });
+      }
+
+      const city = CITIES.find((c) => c.label === payload.slice("city_".length));
+      if (!city) return NextResponse.json({ ok: true });
+
+      const { data: moved } = await db()
+        .from("max_conversations")
+        .update({
+          current_step: "q1",
+          answers: { ...conv.answers, city: city.label },
+        })
+        .eq("chat_id", chatId)
+        .eq("current_step", "city")
+        .select();
+      if (!moved || moved.length === 0) return NextResponse.json({ ok: true });
+
+      await showChosenAnswer(bot, callbackId, CITY_QUESTION, city.label);
+      await askQuestion(bot, chatId, "q1");
+      return NextResponse.json({ ok: true });
+    }
+
     // Кнопка от старого вопроса или повторное нажатие — игнорируем
     if (!(step in QUESTIONS) || !payload.startsWith(`${step}_`)) {
       return NextResponse.json({ ok: true });
@@ -430,7 +623,7 @@ async function handleUpdate(bot: Bot, body: any) {
     await showChosenAnswer(
       bot,
       callbackId,
-      step as QuestionKey,
+      QUESTIONS[step as QuestionKey].text,
       LABELS[payload] ?? payload
     );
 
@@ -460,6 +653,33 @@ async function handleUpdate(bot: Bot, body: any) {
     // Записи нет — запускаем сценарий с начала
     if (!conv) {
       await startConversation(bot, chatId, body.message?.sender?.user_id);
+      return NextResponse.json({ ok: true });
+    }
+
+    // Ждём название города текстом (или клиент написал город вместо нажатия кнопки)
+    if (
+      conv.status === "bot" &&
+      (conv.current_step === "city_text" || conv.current_step === "city")
+    ) {
+      const typed = text.slice(0, 80);
+      if (norm(typed).length < 2) {
+        await askCityText(bot, chatId);
+        return NextResponse.json({ ok: true });
+      }
+
+      const matched = matchCity(typed);
+      const { data: moved } = await db()
+        .from("max_conversations")
+        .update({
+          current_step: "q1",
+          answers: { ...conv.answers, city: matched ? matched.label : typed },
+        })
+        .eq("chat_id", chatId)
+        .eq("current_step", conv.current_step)
+        .select();
+      if (!moved || moved.length === 0) return NextResponse.json({ ok: true });
+
+      await askQuestion(bot, chatId, "q1");
       return NextResponse.json({ ok: true });
     }
 
