@@ -530,7 +530,24 @@ async function startConversation(bot: Bot, chatId: number, userId?: number) {
   }
 }
 
+// ---------- Простой режим (без базы) ----------
+// Включается переменной MAX_SIMPLE_MODE=on. Бот только отправляет одно приветствие
+// при первом запуске и больше не отвечает. Supabase не используется.
+const SIMPLE_GREETING =
+  "Здравствуйте! 👋 Опишите, пожалуйста, одним сообщением: общую сумму долгов (с процентами, штрафами и микрозаймами), перед кем они (банки, МФО, налоги/ЖКХ), есть ли просрочки или суды, есть ли официальный доход и имущество, а также Ваш номер телефона. Специалист изучит и свяжется с Вами прямо в этом чате.";
+
+async function handleSimpleUpdate(bot: Bot, body: any) {
+  if (body.update_type === "bot_started" && body.chat_id) {
+    await sendMessage(bot, body.chat_id, SIMPLE_GREETING);
+  }
+  return NextResponse.json({ ok: true });
+}
+
 async function handleUpdate(bot: Bot, body: any) {
+  if (process.env.MAX_SIMPLE_MODE === "on") {
+    return handleSimpleUpdate(bot, body);
+  }
+
   // --- Пользователь запустил бота (MAX шлёт это только при самом первом запуске) ---
   if (body.update_type === "bot_started") {
     await startConversation(bot, body.chat_id, body.user?.user_id);
