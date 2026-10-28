@@ -229,7 +229,15 @@ async function sendMessage(
       ]
     : undefined;
 
-  await maxApiRequest(bot, `/messages?chat_id=${chatId}`, { text, attachments });
+  const res = await maxApiRequest(bot, `/messages?chat_id=${chatId}`, {
+    text,
+    attachments,
+  });
+  if (res && typeof res === "object" && (res.code || res.success === false)) {
+    console.error("MAX /messages error:", bot.slug, chatId, JSON.stringify(res));
+  } else {
+    console.log("MAX message sent:", bot.slug, chatId);
+  }
 }
 
 async function askQuestion(bot: Bot, chatId: number, step: QuestionKey) {
@@ -534,7 +542,7 @@ async function startConversation(bot: Bot, chatId: number, userId?: number) {
 // Включается переменной MAX_SIMPLE_MODE=on. Бот только отправляет одно приветствие
 // при первом запуске и больше не отвечает. Supabase не используется.
 const SIMPLE_GREETING =
-  "Здравствуйте! 👋 Опишите, пожалуйста, одним сообщением: общую сумму долгов (с процентами, штрафами и микрозаймами), перед кем они (банки, МФО, налоги/ЖКХ), есть ли просрочки или суды, есть ли официальный доход и имущество, а также Ваш номер телефона. Специалист изучит и свяжется с Вами прямо в этом чате.";
+  "Здравствуйте! 👋 Напишите сумму долга и номер телефона, специалист бесплатно разберёт Вашу ситуацию.";
 
 async function handleSimpleUpdate(bot: Bot, body: any) {
   if (body.update_type === "bot_started" && body.chat_id) {
